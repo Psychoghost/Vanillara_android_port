@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">Vanillara</string>
+    <string name="app_subtitle">Command &amp; Conquer: Red Alert — Android source port</string>
+    <string name="setup_title">VANILLARA</string>
+    <string name="data_heading">Game data</string>
+    <string name="data_explainer">This app contains no game data. You must own Command &amp; Conquer: Red Alert. Vanillara creates folders for your Allied and Soviet files; copy your disc/install contents into them, then tap Rescan.</string>
+    <string name="data_folder">Game data folder</string>
+    <string name="data_folder_note">Copy the Allied disc/install contents into allies/ and the Soviet contents into soviet/. Use a USB cable or a file manager. Each side needs INSTALL/REDALERT.INI and the .MIX files. On Android 11+, some file managers hide Android/data; use the import buttons below as a fallback.</string>
+    <string name="copy_path">Copy path</string>
+    <string name="rescan">Rescan</string>
+    <string name="allied_data">Allied data</string>
+    <string name="soviet_data">Soviet data</string>
+    <string name="import_allied">Import Allied folder</string>
+    <string name="import_soviet">Import Soviet folder</string>
+    <string name="not_imported">Not imported</string>
+    <string name="ready">Ready</string>
+    <string name="play">Play</string>
+    <string name="play_needs_data">Import game data to play</string>
+    <string name="clear_data">Clear imported data</string>
+    <string name="help">Help</string>
+    <string name="about">About / license</string>
+    <string name="import_help_title">Importing game data</string>
+    <string name="import_help_body">Vanillara creates two folders for your own Red Alert files:\n\n  …/redalert-root/assets/redalert/allies\n  …/redalert-root/assets/redalert/soviet\n\nThe exact path is shown on the setup screen. Use a USB cable or a file manager to copy the Allied disc/install contents into allies/ and the Soviet contents into soviet/. Then return to Vanillara and tap “Rescan”.\n\nEach side should contain INSTALL/REDALERT.INI and the .MIX files (REDALERT.MIX, CONQUER.MIX, GENERAL.MIX, and so on). Mount or extract ISO/BIN/CUE images first; disc images and archives are ignored. A complete copy needs roughly the free space of both discs.\n\nIf your file manager cannot see Android/data, use “Import Allied folder” / “Import Soviet folder” to grant access to the folders directly. The app copies the files into the same location and never uploads them.\n\nUse “Clear imported data” to start over. Saves and options are removed with the imported data.</string>
+    <string name="about_body">Vanillara is an unofficial Android source port of Command &amp; Conquer: Red Alert.\n\nIt is based on Electronic Arts’ GPLv3 source release and on the ra-port Android/iOS/macOS platform layer. Modified 2026 for Android, including an on-device game-data importer. No game assets are included.\n\nGPLv3 with additional Electronic Arts terms. See LICENSE.md and NOTICE.md in the source repository. “Command &amp; Conquer” and “Red Alert” are trademarks of Electronic Arts Inc. This project is not affiliated with or endorsed by Electronic Arts.</string>
+    <string name="legal_notice">GPLv3 source port. No game data included. Not affiliated with Electronic Arts.</string>
+</resources>
