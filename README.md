@@ -38,9 +38,11 @@ can be installed directly.
 
 1. Install `Vanillara-debug.apk` from the
    [releases page](https://github.com/Psychoghost/Vanillara_android_port/releases/latest).
-2. Open **Vanillara**. On first launch it creates two drop folders:
-   - `…/Android/data/com.vanillara.redalert/files/redalert-root/assets/redalert/allies`
-   - `…/Android/data/com.vanillara.redalert/files/redalert-root/assets/redalert/soviet`
+2. Open **Vanillara**. On Android 12+ it asks you to **Grant file access**
+   (Settings → Apps → Vanillara → allow files and media). It then creates two
+   drop folders on **internal storage**, never on a removable SD card:
+   - `/sdcard/Vanillara/redalert-root/assets/redalert/allies`
+   - `/sdcard/Vanillara/redalert-root/assets/redalert/soviet`
 
    The exact path is shown on the setup screen, with a **Copy path** button.
 3. Copy the contents of your **Allied** disc/install into `allies/` and the
@@ -53,18 +55,22 @@ can be installed directly.
    `REDALERT.MIX` is found.
 5. Tap **Play**.
 
-### If your file manager cannot see Android/data
+### If the folder is not visible
 
-Android 11+ hides `Android/data` from some file managers. Use one of these:
+Android 11+ hides some storage locations unless the app has file access:
 
-- Connect the phone to a computer with USB/MTP and copy the files from there.
-- Use a file manager that supports Android's Storage Access Framework.
-- Use the in-app **Import Allied folder** / **Import Soviet folder** buttons.
-  Select the disc root or install folder; the app copies it into the same
-  private storage location.
+- Tap **Grant file access** and allow access to files and media. The folder is
+  then at `/sdcard/Vanillara/...` in any file manager, or over USB/MTP.
+- If you prefer not to grant access, use the in-app **Import Allied folder** /
+  **Import Soviet folder** buttons. The app copies the data into its private
+  internal folder instead and never uploads or modifies the source.
 
-The import buttons are a fallback, not the primary workflow. They never upload
-anything and never modify the source folder.
+The app always uses internal storage. It does not write to a removable SD card,
+even when one is inserted.
+
+> Upgrading from v0.1? That build used `Android/data/com.vanillara.redalert/`.
+> Move those `redalert-root` folders to `/sdcard/Vanillara/` (or tap **Clear
+> imported data** and import again), then tap **Rescan**.
 
 ## Touch controls
 
@@ -124,11 +130,11 @@ workflow also checks that no `.MIX` files or game assets are present in the APK.
 
 ## How the data folders work
 
-The Java setup screen and the native engine both use app-specific external
-storage:
+The setup screen and the native engine use **internal storage**, never a
+removable SD card:
 
 ```text
-<external files dir>/redalert-root/
+/sdcard/Vanillara/redalert-root/
   assets/redalert/
     allies/
       INSTALL/REDALERT.INI
@@ -138,10 +144,16 @@ storage:
       *.MIX
 ```
 
-If external storage is unavailable, the app falls back to internal storage. The
-native engine starts with its working directory set to `redalert-root`, which is
-why the engine's original `assets/redalert/...` search paths work unchanged.
-Saves, `OPTIONS.INI`, and other runtime files are written there too.
+`/sdcard` is Android's internal shared storage (`/storage/emulated/0`). Android
+11+ requires **All files access** to write there; Android 6-10 uses the storage
+runtime permission. If access is not granted, the app falls back to its private
+internal directory (`/data/user/0/com.vanillara.redalert/files`) and the import
+buttons copy data there.
+
+The app records the active `redalert-root` in a small pointer file, so the
+native engine starts in the right place and the engine's original
+`assets/redalert/...` search paths work unchanged. Saves, `OPTIONS.INI`, and
+other runtime files are written there too.
 
 ## Project layout
 

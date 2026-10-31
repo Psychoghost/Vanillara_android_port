@@ -1,8 +1,12 @@
 package com.vanillara.redalert;
 
+import android.Manifest;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
 
 import androidx.documentfile.provider.DocumentFile;
 
@@ -14,11 +18,16 @@ import java.io.OutputStream;
 import java.util.Locale;
 
 /**
- * Imports user-supplied Red Alert data into the app's private storage and
+ * Imports user-supplied Red Alert data into storage the app controls and
  * answers questions about what is installed.
  *
+ * On Android 12+ the data lives in internal shared storage, at
+ * /sdcard/Vanillara/redalert-root, so a file manager can see it. It never uses
+ * a removable SD card. If the user does not grant file access, the app falls
+ * back to its private internal directory and the in-app import buttons.
+ *
  * The native engine runs with its working directory set to
- * files/redalert-root and expects:
+ * redalert-root and expects:
  *
  *   assets/redalert/allies/INSTALL/REDALERT.INI
  *   assets/redalert/allies/.../*.MIX
@@ -29,6 +38,10 @@ import java.util.Locale;
 public final class GameDataStore {
 
     public static final String ROOT_DIR = "redalert-root";
+    /** Public folder name inside internal shared storage (/sdcard). */
+    public static final String PUBLIC_DIR = "Vanillara";
+    /** Tells the native engine which redalert-root to use. */
+    private static final String POINTER_FILE = "vanillara-root.txt";
     private static final String ASSETS_DIR = "assets";
     private static final String GAME_ASSETS_DIR = "redalert";
 
@@ -79,25 +92,80 @@ public final class GameDataStore {
     }
 
     /**
-     * Prefer app-specific external storage so the folders are visible over USB
-     * and to file managers. Fall back to internal storage when external
-     * storage is unavailable.
+     * Internal shared storage (/sdcard, also called "Internal storage" by
+     * Android and by file managers). This is deliberately not
+     * getExternalFilesDir(): that path can resolve to a removable SD card and
+     * is hidden inside Android/data on Android 11+.
+     */
+    public static File sharedStorageRoot() {
+        return Environment.getExternalStorageDirectory();
+    }
+
+    /**
+     * True when the app can write directly to internal shared storage. Android
+     * 11+ requires "All files access"; Android 6-10 uses the storage runtime
+     * permission.
+     */
+    public static boolean hasSharedStorageAccess(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager();
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
+    /**
+     * The public data folder, or null when the app does not have permission to
+     * write to internal shared storage.
+     */
+    private static File sharedBase(Context context) {
+        if (!hasSharedStorageAccess(context)) {
+            return null;
+        }
+        File base = new File(sharedStorageRoot(), PUBLIC_DIR);
+        if (!base.isDirectory() && !base.mkdirs()) {
+            return null;
+        }
+        return base.canWrite() ? base : null;
+    }
+
+    /**
+     * Internal shared storage when permitted; otherwise the app-private
+     * internal directory. The fallback is never external/SD-card storage.
      */
     private static File storageBase(Context context) {
-        File external = context.getExternalFilesDir(null);
-        if (external != null) {
-            if (!external.isDirectory() && !external.mkdirs()) {
-                return context.getFilesDir();
-            }
-            if (external.canWrite()) {
-                return external;
-            }
+        File shared = sharedBase(context);
+        if (shared != null) {
+            return shared;
         }
-        return context.getFilesDir();
+        File internal = context.getFilesDir();
+        if (internal != null && (internal.isDirectory() || internal.mkdirs())) {
+            return internal;
+        }
+        return context.getCacheDir();
+    }
+
+    /** True when the drop folders are in visible internal storage. */
+    public static boolean isUsingSharedStorage(Context context) {
+        return sharedBase(context) != null;
     }
 
     public static File root(Context context) {
         return new File(storageBase(context), ROOT_DIR);
+    }
+
+    /**
+     * Records the active data root so the native engine does not have to guess
+     * between shared and private storage.
+     */
+    private static void writePointer(Context context) throws IOException {
+        File pointer = new File(context.getFilesDir(), POINTER_FILE);
+        try (OutputStream output = new FileOutputStream(pointer)) {
+            output.write(root(context).getAbsolutePath().getBytes("UTF-8"));
+        }
     }
 
     /**
@@ -118,11 +186,15 @@ public final class GameDataStore {
             }
         }
 
+        writePointer(context);
+
         writeIfMissing(new File(root, "PUT_GAME_FILES_HERE.txt"),
             "VANILLARA GAME DATA\n"
                 + "==================\n\n"
-                + "This app does not include Red Alert game files. Copy your own\n"
-                + "legally obtained Allied and Soviet disc/install contents into:\n\n"
+                + "This folder is on internal storage (/sdcard/Vanillara), not a\n"
+                + "removable SD card. This app does not include Red Alert game files.\n"
+                + "Copy your own legally obtained Allied and Soviet disc/install\n"
+                + "contents into:\n\n"
                 + "  " + allies.getAbsolutePath() + "\n"
                 + "  " + soviet.getAbsolutePath() + "\n\n"
                 + "Each folder should contain INSTALL\\REDALERT.INI and the .MIX files\n"
@@ -202,6 +274,20 @@ public final class GameDataStore {
 
     public static void clear(Context context) {
         GameDataInspector.deleteTree(root(context));
+
+        // Remove data left by the old app-specific external location and by the
+        // private fallback, so "Clear" really starts from an empty state.
+        File internalRoot = new File(context.getFilesDir(), ROOT_DIR);
+        if (!internalRoot.equals(root(context))) {
+            GameDataInspector.deleteTree(internalRoot);
+        }
+        File externalFiles = context.getExternalFilesDir(null);
+        if (externalFiles != null) {
+            File externalRoot = new File(externalFiles, ROOT_DIR);
+            if (!externalRoot.equals(root(context))) {
+                GameDataInspector.deleteTree(externalRoot);
+            }
+        }
     }
 
     public static ImportResult importTree(Context context, Uri treeUri, Side side,
