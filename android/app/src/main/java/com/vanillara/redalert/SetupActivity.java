@@ -1,5 +1,6 @@
 package com.vanillara.redalert;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -7,11 +8,15 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -30,6 +35,7 @@ public class SetupActivity extends Activity {
 
     private static final int REQUEST_ALLIES = 1001;
     private static final int REQUEST_SOVIET = 1002;
+    private static final int REQUEST_STORAGE = 1003;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -40,7 +46,9 @@ public class SetupActivity extends Activity {
     private TextView busyLabel;
     private TextView progressText;
     private TextView dataPath;
+    private TextView storageNote;
     private LinearLayout progressContainer;
+    private Button grantAccess;
     private Button importAllied;
     private Button importSoviet;
     private Button copyPath;
@@ -66,6 +74,8 @@ public class SetupActivity extends Activity {
         progressText = findViewById(R.id.progress_text);
         progressContainer = findViewById(R.id.progress_container);
         dataPath = findViewById(R.id.data_path);
+        storageNote = findViewById(R.id.storage_note);
+        grantAccess = findViewById(R.id.grant_access);
         importAllied = findViewById(R.id.import_allied);
         importSoviet = findViewById(R.id.import_soviet);
         copyPath = findViewById(R.id.copy_path);
@@ -94,6 +104,7 @@ public class SetupActivity extends Activity {
             getString(R.string.import_help_body)));
         about.setOnClickListener(v -> showTextDialog(getString(R.string.about),
             getString(R.string.about_body)));
+        grantAccess.setOnClickListener(v -> requestStorageAccess());
 
         refreshStatus();
     }
@@ -102,6 +113,11 @@ public class SetupActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (!importing) {
+            try {
+                GameDataStore.ensureFolders(this);
+            } catch (Exception ignored) {
+                // Reported by the status card.
+            }
             refreshStatus();
         }
     }
@@ -110,6 +126,60 @@ public class SetupActivity extends Activity {
     protected void onDestroy() {
         executor.shutdownNow();
         super.onDestroy();
+    }
+
+    /**
+     * Android 11+ needs "All files access" before the app can create the
+     * visible /sdcard/Vanillara folder. Without it the app stays usable, but
+     * data lives in private internal storage and must be imported in-app.
+     */
+    private void requestStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Environment.isExternalStorageManager()) {
+                refreshStatus();
+                return;
+            }
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+            try {
+                startActivity(intent);
+            } catch (ActivityNotFoundException first) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                } catch (ActivityNotFoundException second) {
+                    showError("File access unavailable",
+                        "Open Settings > Apps > Vanillara > Permissions and allow access to "
+                            + "files and media, then return here.");
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                REQUEST_STORAGE);
+        } else {
+            refreshStatus();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_STORAGE) {
+            return;
+        }
+        boolean granted = grantResults.length > 0
+            && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        try {
+            GameDataStore.ensureFolders(this);
+        } catch (Exception ignored) {
+            // Reported by the status card.
+        }
+        refreshStatus();
+        if (!granted) {
+            Toast.makeText(this,
+                "Without file access, use the Import buttons to add game data.",
+                Toast.LENGTH_LONG).show();
+        }
     }
 
     private void pickFolder(GameDataStore.Side side) {
@@ -221,6 +291,7 @@ public class SetupActivity extends Activity {
         if (label != null) {
             busyLabel.setText(label);
         }
+        grantAccess.setEnabled(!busy);
         importAllied.setEnabled(!busy);
         importSoviet.setEnabled(!busy);
         copyPath.setEnabled(!busy);
@@ -232,6 +303,15 @@ public class SetupActivity extends Activity {
     }
 
     private void refreshStatus() {
+        boolean shared = GameDataStore.isUsingSharedStorage(this);
+        grantAccess.setVisibility(shared ? View.GONE : View.VISIBLE);
+        storageNote.setVisibility(shared ? View.GONE : View.VISIBLE);
+        if (!shared) {
+            storageNote.setText(getString(R.string.storage_private_note,
+                new java.io.File(GameDataStore.sharedStorageRoot(),
+                    GameDataStore.PUBLIC_DIR).getAbsolutePath()));
+        }
+
         dataPath.setText(GameDataStore.gameAssetsDir(this).getAbsolutePath());
 
         GameDataInspector.Status allied = GameDataStore.status(this, GameDataStore.Side.ALLIES);

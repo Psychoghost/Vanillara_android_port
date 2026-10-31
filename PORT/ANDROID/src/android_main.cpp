@@ -32,6 +32,49 @@ static bool try_resource_root(char const *base)
     return path_exists(config_path);
 }
 
+static bool try_absolute_root(char const *path)
+{
+    static char const *config_path = "assets/redalert/allies/INSTALL/REDALERT.INI";
+    if (!path || !path[0]) {
+        return false;
+    }
+    if (chdir(path) != 0) {
+        return false;
+    }
+    return path_exists(config_path);
+}
+
+/*
+** The Java setup screen records the active redalert-root here. That lets the
+** app use visible internal storage (/sdcard/Vanillara) when the user grants
+** file access, and private internal storage otherwise, without the engine
+** ever guessing or falling back to a removable SD card.
+*/
+static bool try_pointer_file(void)
+{
+    char const *internal = SDL_AndroidGetInternalStoragePath();
+    if (!internal || !internal[0]) {
+        return false;
+    }
+
+    std::string pointer = std::string(internal) + "/vanillara-root.txt";
+    FILE *file = fopen(pointer.c_str(), "rb");
+    if (!file) {
+        return false;
+    }
+
+    char buffer[PATH_MAX];
+    size_t length = fread(buffer, 1, sizeof(buffer) - 1, file);
+    fclose(file);
+    buffer[length] = 0;
+    while (length > 0
+        && (buffer[length - 1] == '\n' || buffer[length - 1] == '\r'
+            || buffer[length - 1] == ' ')) {
+        buffer[--length] = 0;
+    }
+    return try_absolute_root(buffer);
+}
+
 static bool select_resource_root(void)
 {
     static char const *config_path = "assets/redalert/allies/INSTALL/REDALERT.INI";
@@ -39,18 +82,23 @@ static bool select_resource_root(void)
         return true;
     }
 
-    /*
-    ** The Java importer creates folders in app-specific external storage so
-    ** the player can copy game files over USB or with a file manager. Prefer
-    ** that location; fall back to internal storage when external storage is
-    ** unavailable or was not populated.
-    */
-    if (try_resource_root(SDL_AndroidGetExternalStoragePath())) {
+    // 1. The root chosen by the setup screen (internal shared storage, or the
+    //    app-private internal fallback). Never a removable SD card.
+    if (try_pointer_file()) {
         return true;
     }
+
+    // 2. App-private internal storage.
     if (try_resource_root(SDL_AndroidGetInternalStoragePath())) {
         return true;
     }
+
+    // 3. Legacy builds used app-specific external storage. Keep reading it so
+    //    an existing installation still launches.
+    if (try_resource_root(SDL_AndroidGetExternalStoragePath())) {
+        return true;
+    }
+
     return false;
 }
 
