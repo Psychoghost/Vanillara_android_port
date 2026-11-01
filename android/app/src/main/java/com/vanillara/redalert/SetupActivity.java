@@ -1,6 +1,5 @@
 package com.vanillara.redalert;
 
-import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -8,9 +7,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -23,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,7 +33,6 @@ public class SetupActivity extends Activity {
 
     private static final int REQUEST_ALLIES = 1001;
     private static final int REQUEST_SOVIET = 1002;
-    private static final int REQUEST_STORAGE = 1003;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -47,8 +44,10 @@ public class SetupActivity extends Activity {
     private TextView progressText;
     private TextView dataPath;
     private TextView storageNote;
+    private TextView volumeLabel;
     private LinearLayout progressContainer;
     private Button grantAccess;
+    private Button changeLocation;
     private Button importAllied;
     private Button importSoviet;
     private Button copyPath;
@@ -75,7 +74,9 @@ public class SetupActivity extends Activity {
         progressContainer = findViewById(R.id.progress_container);
         dataPath = findViewById(R.id.data_path);
         storageNote = findViewById(R.id.storage_note);
+        volumeLabel = findViewById(R.id.volume_label);
         grantAccess = findViewById(R.id.grant_access);
+        changeLocation = findViewById(R.id.change_location);
         importAllied = findViewById(R.id.import_allied);
         importSoviet = findViewById(R.id.import_soviet);
         copyPath = findViewById(R.id.copy_path);
@@ -94,10 +95,7 @@ public class SetupActivity extends Activity {
         importAllied.setOnClickListener(v -> pickFolder(GameDataStore.Side.ALLIES));
         importSoviet.setOnClickListener(v -> pickFolder(GameDataStore.Side.SOVIET));
         copyPath.setOnClickListener(v -> copyDataPath());
-        rescan.setOnClickListener(v -> {
-            refreshStatus();
-            Toast.makeText(this, "Folders rescanned", Toast.LENGTH_SHORT).show();
-        });
+        rescan.setOnClickListener(v -> rescanData());
         play.setOnClickListener(v -> launchGame());
         clear.setOnClickListener(v -> confirmClear());
         help.setOnClickListener(v -> showTextDialog(getString(R.string.import_help_title),
@@ -105,6 +103,7 @@ public class SetupActivity extends Activity {
         about.setOnClickListener(v -> showTextDialog(getString(R.string.about),
             getString(R.string.about_body)));
         grantAccess.setOnClickListener(v -> requestStorageAccess());
+        changeLocation.setOnClickListener(v -> chooseStorageLocation());
 
         refreshStatus();
     }

@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.vanillara.redalert"
-        minSdk = 23
+        minSdk = 31
         targetSdk = 36
         versionCode = 2
         versionName = "0.2"

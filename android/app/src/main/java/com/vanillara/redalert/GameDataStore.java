@@ -1,33 +1,40 @@
 package com.vanillara.redalert;
 
-import android.Manifest;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.pm.PackageManager;
+import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Environment;
-
-import androidx.documentfile.provider.DocumentFile;
+import android.os.StatFs;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
+import android.provider.DocumentsContract;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Imports user-supplied Red Alert data into storage the app controls and
  * answers questions about what is installed.
  *
- * On Android 12+ the data lives in internal shared storage, at
- * /sdcard/Vanillara/redalert-root, so a file manager can see it. It never uses
- * a removable SD card. If the user does not grant file access, the app falls
- * back to its private internal directory and the in-app import buttons.
+ * The default location is Android's internal shared storage,
+ * /sdcard/Vanillara/redalert-root, so a file manager can see it. The player can
+ * switch to a removable SD card from the setup screen. If file access is not
+ * granted, the app falls back to its private internal directory and the in-app
+ * import buttons.
  *
- * The native engine runs with its working directory set to
- * redalert-root and expects:
+ * The native engine runs with its working directory set to redalert-root and
+ * expects:
  *
  *   assets/redalert/allies/INSTALL/REDALERT.INI
  *   assets/redalert/allies/.../*.MIX
@@ -38,12 +45,33 @@ import java.util.Locale;
 public final class GameDataStore {
 
     public static final String ROOT_DIR = "redalert-root";
-    /** Public folder name inside internal shared storage (/sdcard). */
+    /** Folder name used inside the selected volume. */
     public static final String PUBLIC_DIR = "Vanillara";
     /** Tells the native engine which redalert-root to use. */
     private static final String POINTER_FILE = "vanillara-root.txt";
+    private static final String PREFS = "vanillara-storage";
+    private static final String PREF_VOLUME = "volume-root";
     private static final String ASSETS_DIR = "assets";
     private static final String GAME_ASSETS_DIR = "redalert";
+
+    private static final String[] DOCUMENT_PROJECTION = {
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE,
+    };
+
+    /** One storage volume the player can choose. */
+    public static final class Volume {
+        public final File root;
+        public final String label;
+        public final boolean removable;
+
+        Volume(File root, String label, boolean removable) {
+            this.root = root;
+            this.label = label;
+            this.removable = removable;
+        }
+    }
 
     public enum Side {
         ALLIES("allies", "Allied"),
@@ -88,7 +116,33 @@ public final class GameDataStore {
         long bytes;
     }
 
+    /** A single SAF document, read in one cursor pass per directory. */
+    private static final class SafNode {
+        final String documentId;
+        final String name;
+        final boolean directory;
+        final Uri uri;
+
+        SafNode(String documentId, String name, boolean directory, Uri uri) {
+            this.documentId = documentId;
+            this.name = name;
+            this.directory = directory;
+            this.uri = uri;
+        }
+    }
+
+    /**
+     * Status cache. Scanning a multi-gigabyte tree on every onResume made the
+     * setup screen feel slow, so results are kept until an import, clear,
+     * storage change, or explicit Rescan invalidates them.
+     */
+    private static final Map<String, GameDataInspector.Status> STATUS_CACHE = new HashMap<>();
+
     private GameDataStore() {
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     /**
@@ -102,30 +156,71 @@ public final class GameDataStore {
     }
 
     /**
-     * True when the app can write directly to internal shared storage. Android
-     * 11+ requires "All files access"; Android 6-10 uses the storage runtime
-     * permission.
+     * Every volume the player can choose: internal storage first, then any
+     * mounted removable SD card.
      */
-    public static boolean hasSharedStorageAccess(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return Environment.isExternalStorageManager();
+    public static List<Volume> availableVolumes(Context context) {
+        List<Volume> volumes = new ArrayList<>();
+        addVolume(volumes, Environment.getExternalStorageDirectory(), "Internal storage", false);
+
+        StorageManager manager = context.getSystemService(StorageManager.class);
+        if (manager != null) {
+            for (StorageVolume volume : manager.getStorageVolumes()) {
+                if (!volume.isRemovable()) {
+                    continue;
+                }
+                File directory = volume.getDirectory();
+                if (directory == null) {
+                    continue;
+                }
+                addVolume(volumes, directory, volume.getDescription(context), true);
+            }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED;
+        return volumes;
+    }
+
+    private static void addVolume(List<Volume> volumes, File root, String label, boolean removable) {
+        String path = root.getAbsolutePath();
+        for (Volume volume : volumes) {
+            if (volume.root.getAbsolutePath().equals(path)) {
+                return;
+            }
         }
-        return true;
+        volumes.add(new Volume(root, label, removable));
+    }
+
+    /** The selected volume, or internal storage when the SD card is gone. */
+    public static Volume currentVolume(Context context) {
+        List<Volume> volumes = availableVolumes(context);
+        String saved = prefs(context).getString(PREF_VOLUME, null);
+        if (saved != null) {
+            for (Volume volume : volumes) {
+                if (volume.root.getAbsolutePath().equals(saved)) {
+                    return volume;
+                }
+            }
+        }
+        return volumes.get(0);
+    }
+
+    public static boolean hasRemovableVolume(Context context) {
+        for (Volume volume : availableVolumes(context)) {
+            if (volume.removable) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * The public data folder, or null when the app does not have permission to
-     * write to internal shared storage.
+     * True when the app can write directly to shared storage. Android 12+
+     * requires "All files access".
      */
-    private static File sharedBase(Context context) {
-        if (!hasSharedStorageAccess(context)) {
-            return null;
-        }
-        File base = new File(sharedStorageRoot(), PUBLIC_DIR);
+    public static boolean hasSharedStorageAccess(Context context) {
+        return Environment.isExternalStorageManager();
+    }
+
+    private static File prepareBase(File base) {
         if (!base.isDirectory() && !base.mkdirs()) {
             return null;
         }
@@ -133,11 +228,38 @@ public final class GameDataStore {
     }
 
     /**
-     * Internal shared storage when permitted; otherwise the app-private
-     * internal directory. The fallback is never external/SD-card storage.
+     * The visible data folder on the selected volume, or null when the app
+     * does not have permission to write to shared storage.
+     */
+    private static File publicBase(Context context) {
+        if (!hasSharedStorageAccess(context)) {
+            return null;
+        }
+        Volume selected = currentVolume(context);
+        File base = prepareBase(new File(selected.root, PUBLIC_DIR));
+        if (base != null) {
+            return base;
+        }
+        // The selected volume may be read-only or removed; try the others
+        // rather than silently dropping to private storage.
+        for (Volume volume : availableVolumes(context)) {
+            if (volume.root.getAbsolutePath().equals(selected.root.getAbsolutePath())) {
+                continue;
+            }
+            base = prepareBase(new File(volume.root, PUBLIC_DIR));
+            if (base != null) {
+                return base;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Visible shared storage when permitted; otherwise the app-private
+     * internal directory.
      */
     private static File storageBase(Context context) {
-        File shared = sharedBase(context);
+        File shared = publicBase(context);
         if (shared != null) {
             return shared;
         }
@@ -148,9 +270,14 @@ public final class GameDataStore {
         return context.getCacheDir();
     }
 
-    /** True when the drop folders are in visible internal storage. */
+    /** True when the drop folders are in visible shared storage. */
     public static boolean isUsingSharedStorage(Context context) {
-        return sharedBase(context) != null;
+        return publicBase(context) != null;
+    }
+
+    /** True when the active drop folders are on a removable SD card. */
+    public static boolean isUsingRemovableStorage(Context context) {
+        return publicBase(context) != null && currentVolume(context).removable;
     }
 
     public static File root(Context context) {
@@ -159,7 +286,7 @@ public final class GameDataStore {
 
     /**
      * Records the active data root so the native engine does not have to guess
-     * between shared and private storage.
+     * between storage volumes.
      */
     private static void writePointer(Context context) throws IOException {
         File pointer = new File(context.getFilesDir(), POINTER_FILE);
@@ -191,10 +318,10 @@ public final class GameDataStore {
         writeIfMissing(new File(root, "PUT_GAME_FILES_HERE.txt"),
             "VANILLARA GAME DATA\n"
                 + "==================\n\n"
-                + "This folder is on internal storage (/sdcard/Vanillara), not a\n"
-                + "removable SD card. This app does not include Red Alert game files.\n"
-                + "Copy your own legally obtained Allied and Soviet disc/install\n"
-                + "contents into:\n\n"
+                + "This folder is on " + currentVolume(context).label + ":\n"
+                + "  " + root.getAbsolutePath() + "\n\n"
+                + "This app does not include Red Alert game files. Copy your own\n"
+                + "legally obtained Allied and Soviet disc/install contents into:\n\n"
                 + "  " + allies.getAbsolutePath() + "\n"
                 + "  " + soviet.getAbsolutePath() + "\n\n"
                 + "Each folder should contain INSTALL\\REDALERT.INI and the .MIX files\n"
@@ -233,8 +360,25 @@ public final class GameDataStore {
         return new File(gameAssetsDir(context), side.folder);
     }
 
-    public static GameDataInspector.Status status(Context context, Side side) {
-        return GameDataInspector.inspect(sideDir(context, side));
+    public static synchronized GameDataInspector.Status status(Context context, Side side) {
+        File dir = sideDir(context, side);
+        String key = dir.getAbsolutePath();
+        GameDataInspector.Status cached = STATUS_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        GameDataInspector.Status status = GameDataInspector.inspect(dir);
+        STATUS_CACHE.put(key, status);
+        return status;
+    }
+
+    public static synchronized void rememberStatus(Context context, Side side,
+                                                   GameDataInspector.Status status) {
+        STATUS_CACHE.put(sideDir(context, side).getAbsolutePath(), status);
+    }
+
+    public static synchronized void invalidateStatus() {
+        STATUS_CACHE.clear();
     }
 
     public static boolean isPlayable(Context context) {
@@ -242,10 +386,14 @@ public final class GameDataStore {
             || status(context, Side.SOVIET).isPlayable();
     }
 
+    public static boolean hasGameData(Context context) {
+        return status(context, Side.ALLIES).hasMix || status(context, Side.SOVIET).hasMix;
+    }
+
     /**
      * Creates the INI files the engine expects and reports whether at least one
      * side has the main game archive. Called right before the SDL activity
-     * starts, and again from the setup screen for status.
+     * starts.
      */
     public static boolean prepareForLaunch(Context context) {
         try {
@@ -256,10 +404,12 @@ public final class GameDataStore {
         boolean playable = false;
         for (Side side : Side.values()) {
             File dir = sideDir(context, side);
-            GameDataInspector.Status status = GameDataInspector.inspect(dir);
+            GameDataInspector.Status status = status(context, side);
             if (status.hasMix || side == Side.ALLIES) {
                 try {
-                    GameDataInspector.ensureConfig(dir);
+                    if (GameDataInspector.ensureConfig(dir)) {
+                        invalidateStatus();
+                    }
                 } catch (IOException ignored) {
                     // The status screen reports the missing data; the engine will
                     // also fail cleanly if its INI cannot be created.
@@ -272,22 +422,69 @@ public final class GameDataStore {
         return playable;
     }
 
-    public static void clear(Context context) {
-        GameDataInspector.deleteTree(root(context));
+    /** Selects a volume without moving existing files. */
+    public static void setVolume(Context context, File volumeRoot) {
+        prefs(context).edit().putString(PREF_VOLUME, volumeRoot.getAbsolutePath()).apply();
+        invalidateStatus();
+    }
 
-        // Remove data left by the old app-specific external location and by the
-        // private fallback, so "Clear" really starts from an empty state.
-        File internalRoot = new File(context.getFilesDir(), ROOT_DIR);
-        if (!internalRoot.equals(root(context))) {
-            GameDataInspector.deleteTree(internalRoot);
+    /**
+     * Moves the whole redalert-root tree to another volume. The destination is
+     * copied first and the old tree is deleted only after the copy succeeds, so
+     * a failure leaves the current installation intact.
+     */
+    public static void relocate(Context context, File newVolumeRoot,
+                                ProgressListener listener) throws IOException {
+        File oldRoot = root(context);
+        File newBase = new File(newVolumeRoot, PUBLIC_DIR);
+        File newRoot = new File(newBase, ROOT_DIR);
+        if (oldRoot.getAbsolutePath().equals(newRoot.getAbsolutePath())) {
+            setVolume(context, newVolumeRoot);
+            return;
         }
+        if (!newBase.isDirectory() && !newBase.mkdirs()) {
+            throw new IOException("Unable to create " + newBase.getAbsolutePath());
+        }
+        if (!newBase.canWrite()) {
+            throw new IOException("The selected location is not writable.");
+        }
+
+        String previous = prefs(context).getString(PREF_VOLUME, null);
+        boolean hadData = oldRoot.isDirectory();
+        try {
+            if (hadData) {
+                Counter counter = new Counter();
+                copyLocalTree(oldRoot, newRoot, counter, listener);
+            }
+            setVolume(context, newVolumeRoot);
+            ensureFolders(context);
+            if (hadData) {
+                GameDataInspector.deleteTree(oldRoot);
+            }
+            invalidateStatus();
+        } catch (IOException error) {
+            if (previous == null) {
+                prefs(context).edit().remove(PREF_VOLUME).apply();
+            } else {
+                prefs(context).edit().putString(PREF_VOLUME, previous).apply();
+            }
+            GameDataInspector.deleteTree(newRoot);
+            invalidateStatus();
+            throw error;
+        }
+    }
+
+    public static void clear(Context context) {
+        for (Volume volume : availableVolumes(context)) {
+            GameDataInspector.deleteTree(
+                new File(new File(volume.root, PUBLIC_DIR), ROOT_DIR));
+        }
+        GameDataInspector.deleteTree(new File(context.getFilesDir(), ROOT_DIR));
         File externalFiles = context.getExternalFilesDir(null);
         if (externalFiles != null) {
-            File externalRoot = new File(externalFiles, ROOT_DIR);
-            if (!externalRoot.equals(root(context))) {
-                GameDataInspector.deleteTree(externalRoot);
-            }
+            GameDataInspector.deleteTree(new File(externalFiles, ROOT_DIR));
         }
+        invalidateStatus();
     }
 
     public static ImportResult importTree(Context context, Uri treeUri, Side side,
@@ -295,28 +492,38 @@ public final class GameDataStore {
         if (treeUri == null) {
             throw new ImportException("No folder was selected.");
         }
-        DocumentFile tree = DocumentFile.fromTreeUri(context, treeUri);
-        if (tree == null || !tree.isDirectory()) {
+
+        String rootId;
+        try {
+            rootId = DocumentsContract.getTreeDocumentId(treeUri);
+        } catch (IllegalArgumentException error) {
+            throw new ImportException("The selected item is not a readable folder.");
+        }
+        if (rootId == null) {
             throw new ImportException("The selected item is not a readable folder.");
         }
 
-        DocumentFile source = resolveSource(tree, side);
+        ContentResolver resolver = context.getContentResolver();
+        String rootName = queryDisplayName(resolver,
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId));
+        SafNode source = resolveSource(resolver, treeUri, rootId, rootName, side);
+
         File sideDir = sideDir(context, side);
         File target = sideDir;
-        String sourceName = source.getName();
-        if (sourceName != null && sourceName.equalsIgnoreCase(GameDataInspector.INSTALL_DIR)) {
+        if (source.name != null
+            && source.name.equalsIgnoreCase(GameDataInspector.INSTALL_DIR)) {
             target = new File(sideDir, GameDataInspector.INSTALL_DIR);
         }
-
         if (!target.isDirectory() && !target.mkdirs()) {
             throw new IOException("Unable to create " + target.getAbsolutePath());
         }
 
         Counter counter = new Counter();
-        copyDirectory(context.getContentResolver(), source, target, counter, listener);
+        copyDirectory(resolver, treeUri, source, target, counter, listener);
 
         boolean configCreated = GameDataInspector.ensureConfig(sideDir);
         GameDataInspector.Status status = GameDataInspector.inspect(sideDir);
+        rememberStatus(context, side, status);
         if (!status.hasMainMix) {
             throw new ImportException(
                 "No " + GameDataInspector.MAIN_MIX + " was found in the selected folder.\n\n"
@@ -327,63 +534,101 @@ public final class GameDataStore {
         return new ImportResult(status, counter.files, counter.bytes, configCreated);
     }
 
-    private static DocumentFile resolveSource(DocumentFile tree, Side side) throws ImportException {
-        DocumentFile matching = findChild(tree, side.folder);
-        if (matching != null && matching.isDirectory()) {
+    private static String queryDisplayName(ContentResolver resolver, Uri documentUri) {
+        try (Cursor cursor = resolver.query(documentUri,
+                new String[] {DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                return cursor.getString(0);
+            }
+        } catch (RuntimeException ignored) {
+            // The name is only used to detect an INSTALL folder.
+        }
+        return null;
+    }
+
+    private static SafNode resolveSource(ContentResolver resolver, Uri treeUri, String rootId,
+                                         String rootName, Side side) throws IOException {
+        List<SafNode> children = listChildren(resolver, treeUri, rootId);
+        SafNode matching = find(children, side.folder);
+        if (matching != null && matching.directory) {
             return matching;
         }
 
-        DocumentFile allies = findChild(tree, "allies");
-        DocumentFile soviet = findChild(tree, "soviet");
-        if (allies != null || soviet != null) {
+        boolean hasAllies = find(children, "allies") != null;
+        boolean hasSoviet = find(children, "soviet") != null;
+        if (hasAllies || hasSoviet) {
             Side other = side == Side.ALLIES ? Side.SOVIET : Side.ALLIES;
             throw new ImportException(
                 "This folder contains the " + other.displayName + " data. "
                     + "Use the \"" + other.displayName + "\" import button, "
                     + "or select the folder that contains both allies/ and soviet/.");
         }
-        return tree;
+        return new SafNode(rootId, rootName, true,
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId));
     }
 
-    private static DocumentFile findChild(DocumentFile parent, String name) {
-        DocumentFile[] children = parent.listFiles();
-        if (children == null) {
-            return null;
-        }
-        for (DocumentFile child : children) {
-            String childName = child.getName();
-            if (childName != null && childName.equalsIgnoreCase(name)) {
-                return child;
+    private static SafNode find(List<SafNode> nodes, String name) {
+        for (SafNode node : nodes) {
+            if (node.name != null && node.name.equalsIgnoreCase(name)) {
+                return node;
             }
         }
         return null;
     }
 
-    private static void copyDirectory(ContentResolver resolver, DocumentFile source, File target,
-                                      Counter counter, ProgressListener listener) throws IOException {
-        DocumentFile[] children = source.listFiles();
-        if (children == null) {
-            return;
-        }
-        for (DocumentFile child : children) {
-            String rawName = child.getName();
-            if (rawName == null) {
-                continue;
+    /**
+     * Lists one directory with a single cursor query. DocumentFile.listFiles()
+     * performs several IPC calls per entry, which is the main reason imports
+     * were slow on large disc trees.
+     */
+    private static List<SafNode> listChildren(ContentResolver resolver, Uri treeUri,
+                                              String parentId) throws IOException {
+        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId);
+        List<SafNode> nodes = new ArrayList<>();
+        try (Cursor cursor = resolver.query(childrenUri, DOCUMENT_PROJECTION,
+                null, null, null)) {
+            if (cursor == null) {
+                throw new IOException("The selected folder could not be listed.");
             }
-            String name = GameDataInspector.normalizeSegment(rawName);
-            if (child.isDirectory()) {
+            int idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+            while (cursor.moveToNext()) {
+                String id = idIndex >= 0 ? cursor.getString(idIndex) : null;
+                String name = nameIndex >= 0 ? cursor.getString(nameIndex) : null;
+                String mime = mimeIndex >= 0 ? cursor.getString(mimeIndex) : null;
+                if (id == null || name == null) {
+                    continue;
+                }
+                nodes.add(new SafNode(id, name,
+                    DocumentsContract.Document.MIME_TYPE_DIR.equals(mime),
+                    DocumentsContract.buildDocumentUriUsingTree(treeUri, id)));
+            }
+        } catch (RuntimeException error) {
+            throw new IOException("The selected folder could not be listed.", error);
+        }
+        return nodes;
+    }
+
+    private static void copyDirectory(ContentResolver resolver, Uri treeUri, SafNode source,
+                                      File target, Counter counter, ProgressListener listener)
+        throws IOException {
+        for (SafNode child : listChildren(resolver, treeUri, source.documentId)) {
+            String name = GameDataInspector.normalizeSegment(child.name);
+            if (child.directory) {
                 File directory = new File(target, name);
                 if (!directory.isDirectory() && !directory.mkdirs()) {
                     throw new IOException("Unable to create " + directory.getAbsolutePath());
                 }
-                copyDirectory(resolver, child, directory, counter, listener);
-            } else if (child.isFile() && !GameDataInspector.isBlockedFile(rawName)) {
+                copyDirectory(resolver, treeUri, child, directory, counter, listener);
+            } else if (!GameDataInspector.isBlockedFile(child.name)) {
                 copyFile(resolver, child, new File(target, name), counter, listener);
             }
         }
     }
 
-    private static void copyFile(ContentResolver resolver, DocumentFile source, File target,
+    private static void copyFile(ContentResolver resolver, SafNode source, File target,
                                  Counter counter, ProgressListener listener) throws IOException {
         File parent = target.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
@@ -392,12 +637,12 @@ public final class GameDataStore {
 
         File temporary = new File(parent, target.getName() + ".part");
         long nextNotification = 4L * 1024L * 1024L;
-        try (InputStream input = resolver.openInputStream(source.getUri())) {
+        try (InputStream input = resolver.openInputStream(source.uri)) {
             if (input == null) {
                 throw new IOException("Unable to open " + target.getName());
             }
             try (OutputStream output = new FileOutputStream(temporary)) {
-                byte[] buffer = new byte[128 * 1024];
+                byte[] buffer = new byte[1024 * 1024];
                 int read;
                 while ((read = input.read(buffer)) != -1) {
                     output.write(buffer, 0, read);
@@ -424,6 +669,70 @@ public final class GameDataStore {
         counter.files++;
         if (listener != null) {
             listener.onProgress(target.getName(), counter.files, counter.bytes);
+        }
+    }
+
+    private static void copyLocalTree(File source, File target, Counter counter,
+                                      ProgressListener listener) throws IOException {
+        if (!target.isDirectory() && !target.mkdirs()) {
+            throw new IOException("Unable to create " + target.getAbsolutePath());
+        }
+        File[] children = source.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                copyLocalTree(child, new File(target, child.getName()), counter, listener);
+            } else if (child.isFile()) {
+                copyLocalFile(child, new File(target, child.getName()), counter, listener);
+            }
+        }
+    }
+
+    private static void copyLocalFile(File source, File target, Counter counter,
+                                      ProgressListener listener) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("Unable to create " + parent.getAbsolutePath());
+        }
+        File temporary = new File(parent, target.getName() + ".part");
+        long nextNotification = 4L * 1024L * 1024L;
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = new FileOutputStream(temporary)) {
+            byte[] buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+                counter.bytes += read;
+                if (listener != null && counter.bytes >= nextNotification) {
+                    listener.onProgress(target.getName(), counter.files, counter.bytes);
+                    nextNotification = counter.bytes + 4L * 1024L * 1024L;
+                }
+            }
+        }
+        if (target.exists() && !target.delete()) {
+            //noinspection ResultOfMethodCallIgnored
+            temporary.delete();
+            throw new IOException("Unable to replace " + target.getAbsolutePath());
+        }
+        if (!temporary.renameTo(target)) {
+            //noinspection ResultOfMethodCallIgnored
+            temporary.delete();
+            throw new IOException("Unable to finish writing " + target.getAbsolutePath());
+        }
+        counter.files++;
+        if (listener != null) {
+            listener.onProgress(target.getName(), counter.files, counter.bytes);
+        }
+    }
+
+    /** Free space on the volume that contains the given directory. */
+    public static long freeBytes(File directory) {
+        try {
+            return new StatFs(directory.getAbsolutePath()).getAvailableBytes();
+        } catch (RuntimeException error) {
+            return -1;
         }
     }
 
