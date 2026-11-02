@@ -1,3 +1,12 @@
+<img width="2560" height="1600" alt="image" src="https://github.com/user-attachments/assets/3ca5e520-6c8b-45f9-a4fb-b063c5201477" />
+
+
+
+
+
+
+
+
 # Vanillara — Red Alert on Android
 
 A native Android source port of **Command & Conquer: Red Alert** (1996), built from
