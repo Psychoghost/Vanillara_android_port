@@ -22,8 +22,7 @@ uploads or modifies your files.
 - Touch controls designed for a phone/tablet
 - Game data imported from folders you control
 
-Not included yet: online/network multiplayer, expansion packs, non-arm64 ABIs,
-and a signed release build. The downloadable APK is a debug-signed build that
+Not included yet: expansion packs, and a signed release build and won't ever be a signed release. The downloadable APK is a debug-signed build that
 can be installed directly.
 
 ## Requirements
