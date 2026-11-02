@@ -37,7 +37,8 @@ can be installed directly.
 
 - An Android 6.0+ (API 23) **arm64-v8a** phone or tablet
 - Your own copy of Red Alert: the Allied and Soviet discs, an existing full
-  installation, or the original freeware release
+  installation, or the original freeware release. Buy game here: https://store.steampowered.com/app/2229840/Command_Conquer_Red_Alert_Counterstrike_and_The_Aftermath/
+
 - Free space for both discs' data plus saves
 - A USB cable or file manager to copy the files once
 
