@@ -2936,10 +2936,17 @@ static void Init_Bootstrap_Mixfiles(void)
 #endif
 
 #ifdef FIXIT_CSII	//	Ok. ajw
-	CCFileClass file2("EXPAND2.MIX");
-	if (file2.Is_Available()) {
+	if (CCFileClass("EXPAND2.MIX").Is_Available()) {
 		new MFCD("EXPAND2.MIX", &FastKey);
 		bool ok = MFCD::Cache("EXPAND2.MIX");
+		assert(ok);
+	} else if (CCFileClass("AFTERM.MIX").Is_Available()) {
+		new MFCD("AFTERM.MIX", &FastKey);
+		bool ok = MFCD::Cache("AFTERM.MIX");
+		assert(ok);
+	} else if (CCFileClass("PATCH.MIX").Is_Available()) {
+		new MFCD("PATCH.MIX", &FastKey);
+		bool ok = MFCD::Cache("PATCH.MIX");
 		assert(ok);
 	}
 #endif
@@ -2958,10 +2965,13 @@ static void Init_Bootstrap_Mixfiles(void)
 #endif
 
 #ifdef FIXIT_ANTS	//	Ok. ajw
-	CCFileClass file("EXPAND.MIX");
-	if (file.Is_Available()) {
+	if (CCFileClass("EXPAND.MIX").Is_Available()) {
 		new MFCD("EXPAND.MIX", &FastKey);
 		bool ok = MFCD::Cache("EXPAND.MIX");
+		assert(ok);
+	} else if (CCFileClass("COUNTER.MIX").Is_Available()) {
+		new MFCD("COUNTER.MIX", &FastKey);
+		bool ok = MFCD::Cache("COUNTER.MIX");
 		assert(ok);
 	}
 #endif

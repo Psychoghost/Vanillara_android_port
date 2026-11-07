@@ -85,7 +85,7 @@ static void test_long_press_is_right_click(void)
 
 	MobileTouchGesture_Init(&touch);
 	MobileTouchGesture_Begin(&touch, 7, 30, 40, 3000, &out);
-	MobileTouchGesture_Update(&touch, 3650, &out);
+	MobileTouchGesture_Update(&touch, 3550, &out);
 	assert(out.count == 2);
 	assert(out.events[0].type == MOBILE_TOUCH_RIGHT_DOWN);
 	assert(out.events[1].type == MOBILE_TOUCH_RIGHT_UP);
@@ -96,6 +96,33 @@ static void test_long_press_is_right_click(void)
 	assert(out.count == 0);
 }
 
+static void test_custom_drag_slop_and_long_press(void)
+{
+	MobileTouchGesture touch;
+	MobileTouchGestureOutput out;
+
+	MobileTouchGesture_Init(&touch);
+	touch.drag_slop = 15;
+	touch.long_press_ms = 400;
+
+	MobileTouchGesture_Begin(&touch, 12, 100, 100, 1000, &out);
+	// Move by 12 logical units (under custom slop 15) -> should NOT start drag
+	MobileTouchGesture_Move(&touch, 12, 112, 100, &out);
+	assert(out.count == 0);
+
+	// Update at +450 ms (past custom long_press_ms 400) -> should send right click
+	MobileTouchGesture_Update(&touch, 1450, &out);
+	assert(out.count == 2);
+	assert(out.events[0].type == MOBILE_TOUCH_RIGHT_DOWN);
+
+	// Move by 20 logical units (past custom slop 15) -> starts drag
+	MobileTouchGesture_Move(&touch, 12, 120, 100, &out);
+	assert(out.count == 2);
+	assert(out.events[0].type == MOBILE_TOUCH_LEFT_DOWN);
+
+	MobileTouchGesture_End(&touch, 12, 120, 100, &out);
+}
+
 static void test_delayed_drag_after_long_press_starts_selection(void)
 {
 	MobileTouchGesture touch;
@@ -103,7 +130,7 @@ static void test_delayed_drag_after_long_press_starts_selection(void)
 
 	MobileTouchGesture_Init(&touch);
 	MobileTouchGesture_Begin(&touch, 11, 30, 40, 6000, &out);
-	MobileTouchGesture_Update(&touch, 6650, &out);
+	MobileTouchGesture_Update(&touch, 6550, &out);
 	assert(out.count == 2);
 	assert(out.events[0].type == MOBILE_TOUCH_RIGHT_DOWN);
 	assert(out.events[1].type == MOBILE_TOUCH_RIGHT_UP);
@@ -131,10 +158,10 @@ static void test_small_motion_does_not_hover(void)
 
 	MobileTouchGesture_Init(&touch);
 	MobileTouchGesture_Begin(&touch, 8, 10, 20, 4000, &out);
-	MobileTouchGesture_Move(&touch, 8, 13, 23, &out);
+	MobileTouchGesture_Move(&touch, 8, 18, 28, &out);
 	assert(out.count == 0);
 
-	MobileTouchGesture_End(&touch, 8, 13, 23, &out);
+	MobileTouchGesture_End(&touch, 8, 18, 28, &out);
 	assert(out.count == 2);
 	assert(out.events[0].type == MOBILE_TOUCH_LEFT_DOWN);
 	assert(out.events[0].update_cursor == 0);
@@ -169,6 +196,7 @@ int main(void)
 	test_drag_holds_left_button_after_slop();
 	test_two_finger_pan_releases_drag_without_lingering_cursor();
 	test_long_press_is_right_click();
+	test_custom_drag_slop_and_long_press();
 	test_delayed_drag_after_long_press_starts_selection();
 	test_small_motion_does_not_hover();
 	test_two_finger_pan_cancels_tap();

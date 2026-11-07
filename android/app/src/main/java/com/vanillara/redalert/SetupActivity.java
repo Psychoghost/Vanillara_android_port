@@ -357,6 +357,13 @@ public class SetupActivity extends Activity {
         } else {
             text.append(" • missing ").append(GameDataInspector.MAIN_MIX);
         }
+        if (status.hasCounterstrike && status.hasAftermath) {
+            text.append(" • CS & AM");
+        } else if (status.hasCounterstrike) {
+            text.append(" • Counterstrike");
+        } else if (status.hasAftermath) {
+            text.append(" • Aftermath");
+        }
         if (!status.hasConfig) {
             text.append(" • settings will be generated");
         }

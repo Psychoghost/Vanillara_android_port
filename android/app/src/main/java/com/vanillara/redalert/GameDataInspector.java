@@ -32,13 +32,22 @@ public final class GameDataInspector {
         public final boolean hasMix;
         public final boolean hasMainMix;
         public final boolean hasConfig;
+        public final boolean hasCounterstrike;
+        public final boolean hasAftermath;
 
-        Status(int fileCount, long byteCount, boolean hasMix, boolean hasMainMix, boolean hasConfig) {
+        Status(int fileCount, long byteCount, boolean hasMix, boolean hasMainMix, boolean hasConfig,
+               boolean hasCounterstrike, boolean hasAftermath) {
             this.fileCount = fileCount;
             this.byteCount = byteCount;
             this.hasMix = hasMix;
             this.hasMainMix = hasMainMix;
             this.hasConfig = hasConfig;
+            this.hasCounterstrike = hasCounterstrike;
+            this.hasAftermath = hasAftermath;
+        }
+
+        Status(int fileCount, long byteCount, boolean hasMix, boolean hasMainMix, boolean hasConfig) {
+            this(fileCount, byteCount, hasMix, hasMainMix, hasConfig, false, false);
         }
 
         public boolean isPlayable() {
@@ -47,14 +56,15 @@ public final class GameDataInspector {
     }
 
     public static Status inspect(File sideDir) {
-        int[] counters = new int[] {0, 0, 0}; // files, has mix, has main mix
+        int[] counters = new int[] {0, 0, 0, 0, 0}; // files, has mix, has main mix, has CS, has AM
         long[] bytes = new long[] {0};
         if (sideDir != null && sideDir.isDirectory()) {
             walk(sideDir, counters, bytes);
         }
         boolean hasConfig = sideDir != null
             && (configFile(sideDir).isFile() || new File(sideDir, CONFIG_NAME).isFile());
-        return new Status(counters[0], bytes[0], counters[1] != 0, counters[2] != 0, hasConfig);
+        return new Status(counters[0], bytes[0], counters[1] != 0, counters[2] != 0, hasConfig,
+            counters[3] != 0, counters[4] != 0);
     }
 
     private static void walk(File directory, int[] counters, long[] bytes) {
@@ -73,6 +83,12 @@ public final class GameDataInspector {
                     counters[1] = 1;
                     if (name.equals(MAIN_MIX)) {
                         counters[2] = 1;
+                    }
+                    if (name.equals("EXPAND.MIX") || name.equals("COUNTER.MIX")) {
+                        counters[3] = 1;
+                    }
+                    if (name.equals("EXPAND2.MIX") || name.equals("AFTERM.MIX") || name.equals("PATCH.MIX")) {
+                        counters[4] = 1;
                     }
                 }
             }

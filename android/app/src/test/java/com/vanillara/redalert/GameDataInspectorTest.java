@@ -54,6 +54,19 @@ public class GameDataInspectorTest {
     }
 
     @Test
+    public void expansionPacksAreDetected() throws Exception {
+        File side = temporary.newFolder("allies");
+        write(new File(side, "REDALERT.MIX"), "mix");
+        write(new File(side, "EXPAND.MIX"), "mix");
+        write(new File(side, "EXPAND2.MIX"), "mix");
+
+        GameDataInspector.Status status = GameDataInspector.inspect(side);
+        assertTrue(status.hasMainMix);
+        assertTrue(status.hasCounterstrike);
+        assertTrue(status.hasAftermath);
+    }
+
+    @Test
     public void normalizeSegmentUppercasesAndRemovesSeparators() {
         assertEquals("REDALERT.MIX", GameDataInspector.normalizeSegment("redalert.mix"));
         assertEquals("A_B", GameDataInspector.normalizeSegment("a/b"));

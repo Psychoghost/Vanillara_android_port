@@ -177,6 +177,14 @@ static void test_slow_or_moving_pair_is_not_a_tap(void)
 	MobilePinch_Down(&pinch, 2, 200.0f, 100.0f, 1000);
 	assert(MobilePinch_EndTapFingers(&pinch, 1000 + MobilePinch_TapMs + 1) == 0);
 
+	// Travel of 30 window pixels (natural touch twitch on high-DPI) is within new 45.0f threshold
+	MobilePinch_Init(&pinch);
+	MobilePinch_Down(&pinch, 1, 100.0f, 100.0f, 1000);
+	MobilePinch_Down(&pinch, 2, 200.0f, 100.0f, 1000);
+	MobilePinch_Move(&pinch, 2, 230.0f, 100.0f, &ratio, &mid_x, &mid_y, &mid_dx, &mid_dy);
+	assert(MobilePinch_EndTapFingers(&pinch, 1100) == 2);
+
+	// Large travel of 60 window pixels (intentional gesture) exceeds 45.0f threshold -> not a tap
 	MobilePinch_Init(&pinch);
 	MobilePinch_Down(&pinch, 1, 100.0f, 100.0f, 1000);
 	MobilePinch_Down(&pinch, 2, 200.0f, 100.0f, 1000);

@@ -4481,7 +4481,7 @@ bool Force_CD_Available( int cd_desired )				//	ajw
 			if( cd_desired == CD_DVD )
 			{
 				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[4]);
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[4]);
 				#else
 				#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[4]);
@@ -4493,7 +4493,7 @@ bool Force_CD_Available( int cd_desired )				//	ajw
 			else if( cd_desired == CD_COUNTERSTRIKE || cd_desired == CD_AFTERMATH )
 			{
 				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[cd_desired]);
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[cd_desired]);
 				#else
 				#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[cd_desired]);
@@ -4877,7 +4877,7 @@ bool Force_CD_Available(int cd)
 			#endif
 
 				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[cd]);
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[cd]);
 				#else
 				#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[cd]);
@@ -4890,7 +4890,7 @@ bool Force_CD_Available(int cd)
 				{
 				#ifdef DVD
 				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s", _cd_name[4]);
+			   	sprintf(buffer, "Insï¿½rez le %s", _cd_name[4]);
 				#else
 				#ifdef GERMAN 
 				sprintf(buffer, "Bitte %s", _cd_name[4]);
@@ -5417,29 +5417,19 @@ const char* Game_Registry_Key()
  *=============================================================================================*/
 bool Is_Counterstrike_Installed (void)
 {
-	//	ajw 9/29/98
 	static bool	bAlreadyChecked = false;
 	static bool bInstalled = false;
 
-	if( !bAlreadyChecked )
-	{
-		HKEY hKey;
-		if( RegOpenKeyEx( HKEY_LOCAL_MACHINE, Game_Registry_Key(), 0, KEY_READ, &hKey ) != ERROR_SUCCESS )
-			return false;
-		DWORD dwValue;
-		DWORD dwBufSize = sizeof( DWORD );
-		if( RegQueryValueEx( hKey, "CStrikeInstalled", 0, NULL, (LPBYTE)&dwValue, &dwBufSize ) != ERROR_SUCCESS )
-			bInstalled = false;
-		else
-			bInstalled = (bool)dwValue;			//	(Presumably true, if it's there...)
-
-		RegCloseKey( hKey );
+	if (!bAlreadyChecked) {
+		RawFileClass file("EXPAND.MIX");
+		bInstalled = file.Is_Available();
+		if (!bInstalled) {
+			RawFileClass file2("COUNTER.MIX");
+			bInstalled = file2.Is_Available();
+		}
 		bAlreadyChecked = true;
 	}
 	return bInstalled;
-
-//	RawFileClass file("EXPAND.MIX");
-//	return(file.Is_Available());
 }
 
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
@@ -5447,29 +5437,23 @@ bool Is_Counterstrike_Installed (void)
  *=============================================================================================*/
 bool Is_Aftermath_Installed (void)
 {
-	//	ajw 9/29/98
 	static bool	bAlreadyChecked = false;
 	static bool bInstalled = false;
 
-	if( !bAlreadyChecked )
-	{
-		HKEY hKey;
-		if( RegOpenKeyEx( HKEY_LOCAL_MACHINE, Game_Registry_Key(), 0, KEY_READ, &hKey ) != ERROR_SUCCESS )
-			return false;
-		DWORD dwValue;
-		DWORD dwBufSize = sizeof( DWORD );
-		if( RegQueryValueEx( hKey, "AftermathInstalled", 0, NULL, (LPBYTE)&dwValue, &dwBufSize ) != ERROR_SUCCESS )
-			bInstalled = false;
-		else
-			bInstalled = (bool)dwValue;			//	(Presumably true, if it's there...)
-
-		RegCloseKey( hKey );
+	if (!bAlreadyChecked) {
+		RawFileClass file("EXPAND2.MIX");
+		bInstalled = file.Is_Available();
+		if (!bInstalled) {
+			RawFileClass file2("AFTERM.MIX");
+			bInstalled = file2.Is_Available();
+		}
+		if (!bInstalled) {
+			RawFileClass file3("PATCH.MIX");
+			bInstalled = file3.Is_Available();
+		}
 		bAlreadyChecked = true;
 	}
 	return bInstalled;
-
-//	RawFileClass file("EXPAND2.MIX");
-//	return(file.Is_Available());
 }
 #endif
 

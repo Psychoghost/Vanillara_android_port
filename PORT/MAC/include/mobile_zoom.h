@@ -46,7 +46,7 @@ struct MobilePinchState {
 static const float MobileZoom_MaxScale = 3.0f;
 static const float MobileZoom_SnapScale = 1.05f;
 static const unsigned long MobilePinch_TapMs = 300;
-static const float MobilePinch_TapTravel = 20.0f;
+static const float MobilePinch_TapTravel = 45.0f;
 static const uint32_t MobilePinch_DoubleTapMs = 450;
 
 static inline float MobileZoom_ClampFloat(float value, float min_value, float max_value)

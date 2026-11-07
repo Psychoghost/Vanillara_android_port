@@ -35,6 +35,8 @@ struct MobileTouchGesture {
 	int last_x;
 	int last_y;
 	unsigned long down_tick;
+	int drag_slop;
+	unsigned long long_press_ms;
 };
 
 static inline int MobileTouchGesture_Abs(int value)
@@ -44,9 +46,9 @@ static inline int MobileTouchGesture_Abs(int value)
 
 static inline int MobileTouchGesture_MovedPastSlop(MobileTouchGesture const *touch, int x, int y)
 {
-	static const int drag_slop = 6;
-	return MobileTouchGesture_Abs(x - touch->start_x) > drag_slop ||
-		MobileTouchGesture_Abs(y - touch->start_y) > drag_slop;
+	int slop = (touch && touch->drag_slop > 0) ? touch->drag_slop : 10;
+	return MobileTouchGesture_Abs(x - touch->start_x) > slop ||
+		MobileTouchGesture_Abs(y - touch->start_y) > slop;
 }
 
 static inline void MobileTouchGesture_ClearOutput(MobileTouchGestureOutput *out)
@@ -91,6 +93,8 @@ static inline void MobileTouchGesture_Init(MobileTouchGesture *touch)
 	touch->last_x = 0;
 	touch->last_y = 0;
 	touch->down_tick = 0;
+	touch->drag_slop = 10;
+	touch->long_press_ms = 500;
 }
 
 static inline void MobileTouchGesture_Begin(
@@ -164,7 +168,7 @@ static inline void MobileTouchGesture_Update(
 	unsigned long tick,
 	MobileTouchGestureOutput *out)
 {
-	static const unsigned long long_press_ms = 650;
+	unsigned long required_ms = (touch && touch->long_press_ms > 0) ? touch->long_press_ms : 500;
 
 	MobileTouchGesture_ClearOutput(out);
 	if (!touch || !touch->primary_active || touch->secondary_active ||
@@ -174,7 +178,7 @@ static inline void MobileTouchGesture_Update(
 	if (MobileTouchGesture_MovedPastSlop(touch, touch->last_x, touch->last_y)) {
 		return;
 	}
-	if ((unsigned long)(tick - touch->down_tick) < long_press_ms) {
+	if ((unsigned long)(tick - touch->down_tick) < required_ms) {
 		return;
 	}
 
