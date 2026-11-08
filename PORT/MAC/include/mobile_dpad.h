@@ -27,8 +27,8 @@ static inline void MobileDpad_Init(MobileDpad *d)
 static inline void MobileDpad_Layout(MobileDpad *d, int window_w, int window_h)
 {
 	if (!d) return;
-	int small = window_w < window_h ? window_w : window_h;
-	d->radius = small / 7;
+	int shorter = window_w < window_h ? window_w : window_h;
+	d->radius = shorter / 7;
 	int margin = d->radius / 3;
 	d->cx = margin + d->radius;
 	d->cy = window_h - margin - d->radius;
