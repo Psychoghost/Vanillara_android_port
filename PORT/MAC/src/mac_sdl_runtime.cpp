@@ -674,6 +674,9 @@ bool MacSDL_SetMode(int width, int height)
 	}
 	SDL_SetRenderDrawColor(MacRenderer, 0, 0, 0, 255);
 	MacTexture = SDL_CreateTexture(MacRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+	if (MacTexture) {
+		SDL_SetTextureBlendMode(MacTexture, SDL_BLENDMODE_NONE);
+	}
 	return MacTexture != 0;
 }
 
@@ -918,7 +921,28 @@ void MacSDL_Present8(unsigned char const *pixels, int width, int height, int pit
 
 	MacPresenting = true;
 	mac_sdl_pump_events(false);
-	if (!MacRenderer || !MacTexture) {
+	if (!MacRenderer) {
+		MacPresenting = false;
+		return;
+	}
+
+	if (pitch < width) {
+		pitch = width;
+	}
+
+	if (!MacTexture || MacWidth != width || MacHeight != height) {
+		if (MacTexture) {
+			SDL_DestroyTexture(MacTexture);
+			MacTexture = 0;
+		}
+		MacWidth = width;
+		MacHeight = height;
+		MacTexture = SDL_CreateTexture(MacRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+		if (MacTexture) {
+			SDL_SetTextureBlendMode(MacTexture, SDL_BLENDMODE_NONE);
+		}
+	}
+	if (!MacTexture) {
 		MacPresenting = false;
 		return;
 	}
