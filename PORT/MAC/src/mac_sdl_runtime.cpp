@@ -7,6 +7,7 @@
 #include "../include/mac_sdl_runtime.h"
 #include "mobile_key_message.h"
 #include "mobile_pan.h"
+#include "mobile_touch_buttons.h"
 #include "mobile_touch_gesture.h"
 #include "mobile_zoom.h"
 #include "ra_aspect_viewport.h"
@@ -42,6 +43,7 @@ static MobileTouchGesture MobileTouch;
 static MobilePanState MobilePan;
 static MobileZoomState MobileZoom;
 static MobilePinchState MobilePinch;
+static MobileTouchButtonState MobileTouchButtons;
 static bool MobileTouchCursorHidden = true;
 static bool MobilePointerDragCandidate = false;
 static int MobilePointerDragStartX = 0;
@@ -622,6 +624,7 @@ bool MacSDL_SetMode(int width, int height)
 		MobilePan_Init(&MobilePan);
 		MobileZoom_Init(&MobileZoom);
 		MobilePinch_Init(&MobilePinch);
+		MobileTouchButtons_Init(&MobileTouchButtons);
 #endif
 	}
 
