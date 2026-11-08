@@ -539,6 +539,49 @@ bool MacSDL_SetFullscreen(bool enabled)
 	return true;
 }
 
+static char MacScaleQuality[16] = "nearest";
+
+static char const *mac_scale_quality_requested(void)
+{
+	char const *env = getenv("RA_SCALE_QUALITY");
+	if (!env || !env[0]) {
+		env = getenv("RA_RENDER_SCALE_QUALITY");
+	}
+	if (env && env[0]) {
+		if (strcmp(env, "linear") == 0 || strcmp(env, "1") == 0 || strcmp(env, "bilinear") == 0) {
+			return "linear";
+		}
+		if (strcmp(env, "best") == 0 || strcmp(env, "2") == 0) {
+			return "best";
+		}
+		if (strcmp(env, "nearest") == 0 || strcmp(env, "0") == 0) {
+			return "nearest";
+		}
+	}
+	return MacScaleQuality;
+}
+
+bool MacSDL_SetScaleQuality(char const *quality)
+{
+	if (!quality || !quality[0]) {
+		return false;
+	}
+	if (strcmp(quality, "linear") == 0 || strcmp(quality, "1") == 0 || strcmp(quality, "bilinear") == 0) {
+		strncpy(MacScaleQuality, "linear", sizeof(MacScaleQuality) - 1);
+	} else if (strcmp(quality, "best") == 0 || strcmp(quality, "2") == 0) {
+		strncpy(MacScaleQuality, "best", sizeof(MacScaleQuality) - 1);
+	} else {
+		strncpy(MacScaleQuality, "nearest", sizeof(MacScaleQuality) - 1);
+	}
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, MacScaleQuality);
+	return true;
+}
+
+char const *MacSDL_GetScaleQuality(void)
+{
+	return mac_scale_quality_requested();
+}
+
 bool MacSDL_GetFullscreen(void)
 {
 	return MacFullscreen;
@@ -554,8 +597,8 @@ bool MacSDL_SetMode(int width, int height)
 		SDL_SetMainReady();
 #if defined(RA_MOBILE_TOUCH)
 		SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
-		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 #endif
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, mac_scale_quality_requested());
 		SDL_SetHint(SDL_HINT_RENDER_LOGICAL_SIZE_MODE, "letterbox");
 #if defined(RA_IOS) || defined(RA_ANDROID)
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");

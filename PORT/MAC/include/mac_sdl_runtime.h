@@ -5,6 +5,8 @@
 bool MacSDL_SetMode(int width, int height);
 bool MacSDL_SetFullscreen(bool enabled);
 bool MacSDL_GetFullscreen(void);
+bool MacSDL_SetScaleQuality(char const *quality);
+char const *MacSDL_GetScaleQuality(void);
 void MacSDL_Shutdown(void);
 void MacSDL_SetPalette(PALETTEENTRY const *entries, int count);
 void MacSDL_Present8(unsigned char const *pixels, int width, int height, int pitch);
