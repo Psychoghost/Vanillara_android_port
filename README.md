@@ -30,7 +30,7 @@ uploads or modifies your files.
 - Touch controls designed for a phone/tablet
 - Game data imported from folders you control
 
-Not included yet: expansion packs, and a signed release build and won't ever be a signed release. The downloadable APK is a debug-signed build that
+Expansion support (Counterstrike & Aftermath) is enabled as of v0.3.0. There is no signed release build, and there won't be one. The downloadable APK is a debug-signed build that
 can be installed directly.
 
 ## Requirements
