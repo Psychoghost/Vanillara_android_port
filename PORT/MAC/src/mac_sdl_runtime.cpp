@@ -10,6 +10,7 @@
 #include "mobile_touch_buttons.h"
 #include "mobile_touch_gesture.h"
 #include "mobile_zoom.h"
+#include "mobile_dpad.h"
 #include "ra_aspect_viewport.h"
 #include <mmsystem.h>
 
@@ -44,6 +45,7 @@ static MobilePanState MobilePan;
 static MobileZoomState MobileZoom;
 static MobilePinchState MobilePinch;
 static MobileTouchButtonState MobileTouchButtons;
+static MobileDpad MobileDpadState;
 static bool MobileTouchCursorHidden = true;
 static bool MobilePointerDragCandidate = false;
 static int MobilePointerDragStartX = 0;
@@ -510,6 +512,30 @@ static void mobile_maybe_send_long_press(void)
 	MobileTouchGesture_Update(&MobileTouch, mac_now_ms(), &out);
 	mobile_queue_touch_output(&out);
 }
+
+static void mobile_dpad_layout(void)
+{
+	int window_w = MacWidth;
+	int window_h = MacHeight;
+	if (MacWindow) {
+		SDL_GetWindowSize(MacWindow, &window_w, &window_h);
+	}
+	MobileDpad_Layout(&MobileDpadState, window_w, window_h);
+}
+
+static void mobile_dpad_pulse(void)
+{
+	if (InMovie) {
+		return;
+	}
+	switch (MobileDpad_Tick(&MobileDpadState, mac_now_ms())) {
+		case DPAD_UP:    mac_queue_unmodified_key_pulse(VK_UP); break;
+		case DPAD_DOWN:  mac_queue_unmodified_key_pulse(VK_DOWN); break;
+		case DPAD_LEFT:  mac_queue_unmodified_key_pulse(VK_LEFT); break;
+		case DPAD_RIGHT: mac_queue_unmodified_key_pulse(VK_RIGHT); break;
+		default: break;
+	}
+}
 #endif
 
 static void mac_destroy_video_objects(void)
@@ -625,6 +651,7 @@ bool MacSDL_SetMode(int width, int height)
 		MobileZoom_Init(&MobileZoom);
 		MobilePinch_Init(&MobilePinch);
 		MobileTouchButtons_Init(&MobileTouchButtons);
+		MobileDpad_Init(&MobileDpadState);
 #endif
 	}
 
@@ -719,6 +746,7 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 	MacMM_PumpTimers();
 #if defined(RA_MOBILE_TOUCH)
 	mobile_maybe_send_long_press();
+	mobile_dpad_pulse();
 #endif
 	SDL_Event event;
 	bool saw_sdl_event = false;
@@ -755,6 +783,15 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 			case SDL_FINGERDOWN: {
 				int x = 0;
 				int y = 0;
+				if (MacWindow && !InMovie) {
+					float pad_x = 0.0f;
+					float pad_y = 0.0f;
+					mobile_window_point(event.tfinger.x, event.tfinger.y, &pad_x, &pad_y);
+					mobile_dpad_layout();
+					if (MobileDpad_Down(&MobileDpadState, (long long)event.tfinger.fingerId, pad_x, pad_y, mac_now_ms())) {
+						break;
+					}
+				}
 				if (!mobile_logical_point(event.tfinger.x, event.tfinger.y, &x, &y)) {
 					break;
 				}
@@ -774,6 +811,13 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 			case SDL_FINGERMOTION: {
 				int x = 0;
 				int y = 0;
+				if (MobileDpad_Owns(&MobileDpadState, (long long)event.tfinger.fingerId)) {
+					float pad_x = 0.0f;
+					float pad_y = 0.0f;
+					mobile_window_point(event.tfinger.x, event.tfinger.y, &pad_x, &pad_y);
+					MobileDpad_Move(&MobileDpadState, (long long)event.tfinger.fingerId, pad_x, pad_y);
+					break;
+				}
 				mobile_logical_point(event.tfinger.x, event.tfinger.y, &x, &y);
 				float window_x = 0.0f;
 				float window_y = 0.0f;
@@ -802,6 +846,10 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 			case SDL_FINGERUP: {
 				int x = 0;
 				int y = 0;
+				if (MobileDpad_Owns(&MobileDpadState, (long long)event.tfinger.fingerId)) {
+					MobileDpad_Up(&MobileDpadState, (long long)event.tfinger.fingerId);
+					break;
+				}
 				if (MobilePinch_BothActive(&MobilePinch)) {
 					unsigned long now = mac_now_ms();
 					int tap_fingers = MobilePinch_EndTapFingers(&MobilePinch, now);
@@ -992,6 +1040,38 @@ void MacSDL_Present8(unsigned char const *pixels, int width, int height, int pit
 	}
 #endif
 	SDL_RenderCopy(MacRenderer, MacTexture, source, &destination);
+#if defined(RA_MOBILE_TOUCH)
+	if (!InMovie && MacWindow) {
+		int dpad_window_w = 0;
+		int dpad_window_h = 0;
+		int dpad_output_w = 0;
+		int dpad_output_h = 0;
+		SDL_GetWindowSize(MacWindow, &dpad_window_w, &dpad_window_h);
+		SDL_GetRendererOutputSize(MacRenderer, &dpad_output_w, &dpad_output_h);
+		if (dpad_window_w > 0 && dpad_window_h > 0 && dpad_output_w > 0 && dpad_output_h > 0) {
+			mobile_dpad_layout();
+			float dpad_sx = (float)dpad_output_w / (float)dpad_window_w;
+			float dpad_sy = (float)dpad_output_h / (float)dpad_window_h;
+			int dpad_half = MobileDpadState.radius / 3;
+			int dpad_arm = MobileDpadState.radius * 2 / 3;
+			struct { int dx, dy, dir; } dpad_arms[4] = {
+				{0, -1, DPAD_UP}, {0, 1, DPAD_DOWN}, {-1, 0, DPAD_LEFT}, {1, 0, DPAD_RIGHT}
+			};
+			SDL_SetRenderDrawBlendMode(MacRenderer, SDL_BLENDMODE_BLEND);
+			for (int arm_index = 0; arm_index < 4; ++arm_index) {
+				bool pressed = MobileDpadState.active && MobileDpadState.dir == dpad_arms[arm_index].dir;
+				SDL_Rect arm_rect;
+				arm_rect.x = (int)((float)(MobileDpadState.cx + dpad_arms[arm_index].dx * dpad_arm - dpad_half) * dpad_sx);
+				arm_rect.y = (int)((float)(MobileDpadState.cy + dpad_arms[arm_index].dy * dpad_arm - dpad_half) * dpad_sy);
+				arm_rect.w = (int)((float)(dpad_half * 2) * dpad_sx);
+				arm_rect.h = (int)((float)(dpad_half * 2) * dpad_sy);
+				SDL_SetRenderDrawColor(MacRenderer, 255, 255, 255, pressed ? 150 : 60);
+				SDL_RenderFillRect(MacRenderer, &arm_rect);
+			}
+			SDL_SetRenderDrawBlendMode(MacRenderer, SDL_BLENDMODE_NONE);
+		}
+	}
+#endif
 	SDL_RenderPresent(MacRenderer);
 	MacPresenting = false;
 }
