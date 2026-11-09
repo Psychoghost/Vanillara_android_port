@@ -185,7 +185,7 @@ This is an unofficial, modified source port. It is based on:
 - SDL 2, zlib, and the other dependencies listed in their own notices.
 
 The Android setup screen, folder creation, game-data importer, and packaging
-changes were added in 2026. See [`LICENSE.md`](LICENSE.md) and
+changes were added in 2026 by me. See [`LICENSE.md`](LICENSE.md) and
 [`NOTICE.md`](NOTICE.md).
 
 **No game assets are included.** The repository contains only source code and
