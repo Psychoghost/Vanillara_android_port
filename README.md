@@ -6,7 +6,7 @@
 
 
 **Disclosure - this port was Ai assisted to speed up the work**
-# Vanillara — Red Alert on Android
+# Vanillara — Red Alert on Android 
 
 A native Android source port of **Command & Conquer: Red Alert** (1996), built from
 Electronic Arts' GPLv3 source release with the Android platform layer from
