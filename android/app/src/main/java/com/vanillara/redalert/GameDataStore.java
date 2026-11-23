@@ -11,11 +11,16 @@ import android.os.Environment;
 import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Imports user-supplied Red Alert data into storage the app controls and
@@ -27,11 +32,15 @@ import java.util.Locale;
  * back to its private internal directory and the in-app import buttons.
  *
  * The native engine runs with its working directory set to
- * redalert-root and expects:
+ * redalert-root and searches only these folders (upper-case names):
  *
- *   assets/redalert/allies/INSTALL/REDALERT.INI
- *   assets/redalert/allies/.../*.MIX
- *   assets/redalert/soviet/.../*.MIX
+ *   assets/redalert/allies/        and  assets/redalert/allies/INSTALL/
+ *   assets/redalert/soviet/        and  assets/redalert/soviet/INSTALL/
+ *
+ * The importer scans the selected folder in whatever layout it has, works out
+ * what each file is, renames it to upper case and places it where the engine
+ * looks: each disc's MAIN.MIX at the side's top level, and REDALERT.MIX, the
+ * expansion archives and the other shared .MIX files in INSTALL on both sides.
  *
  * Nothing is bundled in the APK. The importer is the only way data gets in.
  */
@@ -44,6 +53,11 @@ public final class GameDataStore {
     private static final String POINTER_FILE = "vanillara-root.txt";
     private static final String ASSETS_DIR = "assets";
     private static final String GAME_ASSETS_DIR = "redalert";
+
+    private static final String REDALERT_MIX = GameDataInspector.MAIN_MIX;
+    private static final String DISC_MAIN_MIX = GameDataLayout.MAIN_NAME;
+    private static final int MAX_DEPTH = 8;
+    private static final int MAX_ENTRIES = 40000;
 
     public enum Side {
         ALLIES("allies", "Allied"),
@@ -63,13 +77,16 @@ public final class GameDataStore {
         public final int importedFiles;
         public final long importedBytes;
         public final boolean configCreated;
+        /** Plain-text report of what is and is not in place after the import. */
+        public final String summary;
 
         ImportResult(GameDataInspector.Status status, int importedFiles, long importedBytes,
-                     boolean configCreated) {
+                     boolean configCreated, String summary) {
             this.status = status;
             this.importedFiles = importedFiles;
             this.importedBytes = importedBytes;
             this.configCreated = configCreated;
+            this.summary = summary;
         }
     }
 
@@ -86,6 +103,77 @@ public final class GameDataStore {
     private static final class Counter {
         int files;
         long bytes;
+    }
+
+    private static final class Entry {
+        final DocumentFile file;
+        final String name;
+
+        Entry(DocumentFile file, String name) {
+            this.file = file;
+            this.name = name;
+        }
+    }
+
+    /** What the scan found, before anything is copied. */
+    private static final class Plan {
+        Entry mainAllies;
+        Entry mainSoviet;
+        final List<Entry> mainUnknown = new ArrayList<>();
+        final Map<String, Entry> shared = new LinkedHashMap<>();
+        Entry config;
+        final List<Entry> scenarios = new ArrayList<>();
+        int expansionMains;
+        int duplicates;
+        int skipped;
+        int seen;
+
+        void add(DocumentFile file, String rawName, String[] folders) {
+            GameDataLayout.Decision decision = GameDataLayout.classify(folders, rawName);
+            Entry entry = new Entry(file, decision.name);
+            switch (decision.kind) {
+                case MAIN_ALLIES:
+                    if (mainAllies == null) {
+                        mainAllies = entry;
+                    } else {
+                        duplicates++;
+                    }
+                    break;
+                case MAIN_SOVIET:
+                    if (mainSoviet == null) {
+                        mainSoviet = entry;
+                    } else {
+                        duplicates++;
+                    }
+                    break;
+                case MAIN_UNKNOWN:
+                    mainUnknown.add(entry);
+                    break;
+                case MAIN_EXPANSION:
+                    expansionMains++;
+                    break;
+                case SHARED_MIX:
+                    if (!shared.containsKey(decision.name)) {
+                        shared.put(decision.name, entry);
+                    } else {
+                        duplicates++;
+                    }
+                    break;
+                case CONFIG_INI:
+                    if (config == null) {
+                        config = entry;
+                    } else {
+                        duplicates++;
+                    }
+                    break;
+                case SCENARIO_FILE:
+                    scenarios.add(entry);
+                    break;
+                default:
+                    skipped++;
+                    break;
+            }
+        }
     }
 
     private GameDataStore() {
@@ -193,26 +281,31 @@ public final class GameDataStore {
                 + "==================\n\n"
                 + "This folder is on internal storage (/sdcard/Vanillara), not a\n"
                 + "removable SD card. This app does not include Red Alert game files.\n"
-                + "Copy your own legally obtained Allied and Soviet disc/install\n"
-                + "contents into:\n\n"
-                + "  " + allies.getAbsolutePath() + "\n"
-                + "  " + soviet.getAbsolutePath() + "\n\n"
-                + "Each folder should contain INSTALL\\REDALERT.INI and the .MIX files\n"
-                + "(REDALERT.MIX, CONQUER.MIX, GENERAL.MIX, and so on).\n\n"
+                + "The easiest way to add your own legally obtained files is the Import\n"
+                + "buttons in the app: pick the folder that holds your disc contents (or a\n"
+                + "folder with allied/ and soviet/ subfolders). The importer sorts and\n"
+                + "renames the files for you.\n\n"
+                + "If you copy files by hand, the engine only looks here, with UPPER-CASE\n"
+                + "names:\n\n"
+                + "  " + allies.getAbsolutePath() + "\\MAIN.MIX (Allied disc)\n"
+                + "  " + allies.getAbsolutePath() + "\\INSTALL\\REDALERT.MIX\n"
+                + "  " + soviet.getAbsolutePath() + "\\MAIN.MIX (Soviet disc)\n"
+                + "  " + soviet.getAbsolutePath() + "\\INSTALL\\REDALERT.MIX\n\n"
+                + "Put EXPAND.MIX, EXPAND2.MIX and the other shared .MIX files in INSTALL.\n"
                 + "Mount or extract ISO/BIN/CUE images first; disc images and archives\n"
                 + "are not read by the game. After copying, open Vanillara and tap\n"
                 + "\"Rescan\".\n");
         writeIfMissing(new File(allies, "PUT_ALLIED_FILES_HERE.txt"),
             "ALLIED RED ALERT DATA\n"
                 + "=====================\n\n"
-                + "Copy the contents of your Allied disc or full installation here.\n"
-                + "Expected: INSTALL\\REDALERT.INI and the .MIX files from the disc.\n"
+                + "Needed here: MAIN.MIX from the Allied disc, and INSTALL\\REDALERT.MIX.\n"
+                + "The Import button does this for you. Names must be UPPER CASE.\n"
                 + "Do not put .ISO, .BIN, or .CUE images here; mount or extract them first.\n");
         writeIfMissing(new File(soviet, "PUT_SOVIET_FILES_HERE.txt"),
             "SOVIET RED ALERT DATA\n"
                 + "=====================\n\n"
-                + "Copy the contents of your Soviet disc or full installation here.\n"
-                + "Expected: INSTALL\\REDALERT.INI and the .MIX files from the disc.\n"
+                + "Needed here: MAIN.MIX from the Soviet disc, and INSTALL\\REDALERT.MIX.\n"
+                + "The Import button does this for you. Names must be UPPER CASE.\n"
                 + "Do not put .ISO, .BIN, or .CUE images here; mount or extract them first.\n");
     }
 
@@ -235,6 +328,16 @@ public final class GameDataStore {
 
     public static GameDataInspector.Status status(Context context, Side side) {
         return GameDataInspector.inspect(sideDir(context, side));
+    }
+
+    /** True when the disc's MAIN.MIX is where the engine searches for it. */
+    public static boolean hasEngineMain(Context context, Side side) {
+        return hasEngineFile(sideDir(context, side), DISC_MAIN_MIX);
+    }
+
+    private static boolean hasEngineFile(File sideDir, String name) {
+        return new File(sideDir, name).isFile()
+            || new File(new File(sideDir, GameDataInspector.INSTALL_DIR), name).isFile();
     }
 
     public static boolean isPlayable(Context context) {
@@ -290,6 +393,11 @@ public final class GameDataStore {
         }
     }
 
+    /**
+     * Imports the whole game from the selected folder, whatever its layout.
+     * The button that was pressed only matters for a MAIN.MIX whose folder
+     * names do not say which disc it came from.
+     */
     public static ImportResult importTree(Context context, Uri treeUri, Side side,
                                           ProgressListener listener) throws IOException {
         if (treeUri == null) {
@@ -300,86 +408,170 @@ public final class GameDataStore {
             throw new ImportException("The selected item is not a readable folder.");
         }
 
-        DocumentFile source = resolveSource(tree, side);
-        File sideDir = sideDir(context, side);
-        File target = sideDir;
-        String sourceName = source.getName();
-        if (sourceName != null && sourceName.equalsIgnoreCase(GameDataInspector.INSTALL_DIR)) {
-            target = new File(sideDir, GameDataInspector.INSTALL_DIR);
+        Plan plan = new Plan();
+        List<String> folders = new ArrayList<>();
+        if (tree.getName() != null) {
+            folders.add(tree.getName());
+        }
+        collect(tree, folders, plan, 0);
+        assignUnknownMains(plan, side);
+
+        File alliesDir = sideDir(context, Side.ALLIES);
+        File sovietDir = sideDir(context, Side.SOVIET);
+        boolean haveRedAlert = plan.shared.containsKey(REDALERT_MIX)
+            || hasEngineFile(alliesDir, REDALERT_MIX) || hasEngineFile(sovietDir, REDALERT_MIX);
+        boolean haveMain = plan.mainAllies != null || plan.mainSoviet != null
+            || hasEngineFile(alliesDir, DISC_MAIN_MIX) || hasEngineFile(sovietDir, DISC_MAIN_MIX);
+        if (!haveRedAlert || !haveMain) {
+            throw new ImportException(missingMessage(plan, haveRedAlert, haveMain));
         }
 
-        if (!target.isDirectory() && !target.mkdirs()) {
-            throw new IOException("Unable to create " + target.getAbsolutePath());
-        }
+        File alliesInstall = new File(alliesDir, GameDataInspector.INSTALL_DIR);
+        File sovietInstall = new File(sovietDir, GameDataInspector.INSTALL_DIR);
+        makeDirectory(alliesInstall);
+        makeDirectory(sovietInstall);
 
+        ContentResolver resolver = context.getContentResolver();
         Counter counter = new Counter();
-        copyDirectory(context.getContentResolver(), source, target, counter, listener);
 
-        boolean configCreated = GameDataInspector.ensureConfig(sideDir);
-        GameDataInspector.Status status = GameDataInspector.inspect(sideDir);
-        if (!status.hasMainMix) {
-            throw new ImportException(
-                "No " + GameDataInspector.MAIN_MIX + " was found in the selected folder.\n\n"
-                    + "Choose the root of the " + side.displayName
-                    + " disc (the folder that contains INSTALL and the .MIX files), "
-                    + "not a single subfolder. Disc images are not imported.");
+        if (plan.mainAllies != null) {
+            copyFile(resolver, plan.mainAllies.file, new File(alliesDir, DISC_MAIN_MIX), counter, listener);
         }
-        return new ImportResult(status, counter.files, counter.bytes, configCreated);
+        if (plan.mainSoviet != null) {
+            copyFile(resolver, plan.mainSoviet.file, new File(sovietDir, DISC_MAIN_MIX), counter, listener);
+        }
+        for (Entry entry : plan.shared.values()) {
+            File first = new File(alliesInstall, entry.name);
+            copyFile(resolver, entry.file, first, counter, listener);
+            copyLocal(first, new File(sovietInstall, entry.name));
+        }
+        if (plan.config != null) {
+            File first = new File(alliesInstall, plan.config.name);
+            copyFile(resolver, plan.config.file, first, counter, listener);
+            copyLocal(first, new File(sovietInstall, plan.config.name));
+        }
+        File scenarioDir = sideDir(context, side);
+        for (Entry entry : plan.scenarios) {
+            copyFile(resolver, entry.file, new File(scenarioDir, entry.name), counter, listener);
+        }
+
+        boolean configCreated = GameDataInspector.ensureConfig(alliesDir);
+        configCreated |= GameDataInspector.ensureConfig(sovietDir);
+        writePointer(context);
+
+        GameDataInspector.Status status = GameDataInspector.inspect(sideDir(context, side));
+        return new ImportResult(status, counter.files, counter.bytes, configCreated,
+            buildSummary(context, plan));
     }
 
-    private static DocumentFile resolveSource(DocumentFile tree, Side side) throws ImportException {
-        DocumentFile matching = findChild(tree, side.folder);
-        if (matching != null && matching.isDirectory()) {
-            return matching;
+    private static void collect(DocumentFile directory, List<String> folders, Plan plan, int depth)
+            throws ImportException {
+        if (depth > MAX_DEPTH) {
+            return;
         }
-
-        DocumentFile allies = findChild(tree, "allies");
-        DocumentFile soviet = findChild(tree, "soviet");
-        if (allies != null || soviet != null) {
-            Side other = side == Side.ALLIES ? Side.SOVIET : Side.ALLIES;
-            throw new ImportException(
-                "This folder contains the " + other.displayName + " data. "
-                    + "Use the \"" + other.displayName + "\" import button, "
-                    + "or select the folder that contains both allies/ and soviet/.");
-        }
-        return tree;
-    }
-
-    private static DocumentFile findChild(DocumentFile parent, String name) {
-        DocumentFile[] children = parent.listFiles();
-        if (children == null) {
-            return null;
-        }
-        for (DocumentFile child : children) {
-            String childName = child.getName();
-            if (childName != null && childName.equalsIgnoreCase(name)) {
-                return child;
-            }
-        }
-        return null;
-    }
-
-    private static void copyDirectory(ContentResolver resolver, DocumentFile source, File target,
-                                      Counter counter, ProgressListener listener) throws IOException {
-        DocumentFile[] children = source.listFiles();
+        DocumentFile[] children = directory.listFiles();
         if (children == null) {
             return;
         }
         for (DocumentFile child : children) {
+            if (++plan.seen > MAX_ENTRIES) {
+                throw new ImportException("That folder holds too many files. "
+                    + "Pick the folder that contains the game files.");
+            }
             String rawName = child.getName();
             if (rawName == null) {
                 continue;
             }
-            String name = GameDataInspector.normalizeSegment(rawName);
             if (child.isDirectory()) {
-                File directory = new File(target, name);
-                if (!directory.isDirectory() && !directory.mkdirs()) {
-                    throw new IOException("Unable to create " + directory.getAbsolutePath());
-                }
-                copyDirectory(resolver, child, directory, counter, listener);
-            } else if (child.isFile() && !GameDataInspector.isBlockedFile(rawName)) {
-                copyFile(resolver, child, new File(target, name), counter, listener);
+                folders.add(rawName);
+                collect(child, folders, plan, depth + 1);
+                folders.remove(folders.size() - 1);
+            } else if (child.isFile()) {
+                plan.add(child, rawName, folders.toArray(new String[0]));
             }
+        }
+    }
+
+    /**
+     * A MAIN.MIX with no Allied/Soviet hint goes to the side whose button was
+     * pressed. Two unlabeled ones cannot be told apart, so the user is asked
+     * to import one disc at a time.
+     */
+    private static void assignUnknownMains(Plan plan, Side preferred) throws ImportException {
+        if (plan.mainUnknown.isEmpty()) {
+            return;
+        }
+        if (plan.mainUnknown.size() > 1) {
+            throw new ImportException("Found " + plan.mainUnknown.size()
+                + " MAIN.MIX files with no Allied or Soviet folder name, so they cannot be told apart.\n\n"
+                + "Import one disc at a time: pick the Allied disc folder with the Allied button, "
+                + "then the Soviet disc folder with the Soviet button. Or name the folders allied and soviet.");
+        }
+        Entry entry = plan.mainUnknown.get(0);
+        boolean preferAllies = preferred == Side.ALLIES;
+        if (preferAllies && plan.mainAllies == null) {
+            plan.mainAllies = entry;
+        } else if (!preferAllies && plan.mainSoviet == null) {
+            plan.mainSoviet = entry;
+        } else if (plan.mainAllies == null) {
+            plan.mainAllies = entry;
+        } else if (plan.mainSoviet == null) {
+            plan.mainSoviet = entry;
+        } else {
+            plan.duplicates++;
+        }
+    }
+
+    private static String missingMessage(Plan plan, boolean haveRedAlert, boolean haveMain) {
+        StringBuilder text = new StringBuilder("Nothing was imported.\n\n");
+        if (!haveRedAlert) {
+            text.append("- REDALERT.MIX was not found (retail discs keep it in the INSTALL folder).\n");
+        }
+        if (!haveMain) {
+            text.append("- MAIN.MIX was not found (retail discs keep it in the disc root).\n");
+        }
+        text.append("\nSelect the folder that holds the disc contents, or a folder that contains "
+            + "allied and soviet subfolders with the files. Disc images (ISO/BIN/CUE) and archives "
+            + "are not read.\n\nOther .MIX files found: ").append(plan.shared.size());
+        return text.toString();
+    }
+
+    private static String buildSummary(Context context, Plan plan) {
+        File allies = sideDir(context, Side.ALLIES);
+        File soviet = sideDir(context, Side.SOVIET);
+        GameDataInspector.Status alliesStatus = GameDataInspector.inspect(allies);
+        GameDataInspector.Status sovietStatus = GameDataInspector.inspect(soviet);
+        boolean redAlert = hasEngineFile(allies, REDALERT_MIX) || hasEngineFile(soviet, REDALERT_MIX);
+
+        StringBuilder text = new StringBuilder();
+        text.append("Allied MAIN.MIX: ")
+            .append(hasEngineFile(allies, DISC_MAIN_MIX) ? "ready" : "MISSING").append('\n');
+        text.append("Soviet MAIN.MIX: ")
+            .append(hasEngineFile(soviet, DISC_MAIN_MIX) ? "ready" : "MISSING").append('\n');
+        text.append("REDALERT.MIX: ").append(redAlert ? "ready" : "MISSING").append('\n');
+        text.append("Counterstrike: ")
+            .append(alliesStatus.hasCounterstrike || sovietStatus.hasCounterstrike ? "found" : "not found")
+            .append('\n');
+        text.append("Aftermath: ")
+            .append(alliesStatus.hasAftermath || sovietStatus.hasAftermath ? "found" : "not found")
+            .append('\n');
+        if (plan.expansionMains > 0) {
+            text.append("\nSkipped ").append(plan.expansionMains)
+                .append(" expansion-disc MAIN.MIX file(s). The game detects the expansions from "
+                    + "EXPAND.MIX and EXPAND2.MIX.");
+        }
+        if (plan.duplicates > 0) {
+            text.append("\nIgnored ").append(plan.duplicates).append(" duplicate file(s).");
+        }
+        if (plan.skipped > 0) {
+            text.append("\nIgnored ").append(plan.skipped).append(" unrelated file(s).");
+        }
+        return text.toString().trim();
+    }
+
+    private static void makeDirectory(File directory) throws IOException {
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            throw new IOException("Unable to create " + directory.getAbsolutePath());
         }
     }
 
@@ -424,6 +616,33 @@ public final class GameDataStore {
         counter.files++;
         if (listener != null) {
             listener.onProgress(target.getName(), counter.files, counter.bytes);
+        }
+    }
+
+    /** Copies a file that is already in app storage, e.g. to the second side's INSTALL. */
+    private static void copyLocal(File source, File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("Unable to create " + parent.getAbsolutePath());
+        }
+        File temporary = new File(parent, target.getName() + ".part");
+        try (InputStream input = new FileInputStream(source);
+             OutputStream output = new FileOutputStream(temporary)) {
+            byte[] buffer = new byte[128 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+        }
+        if (target.exists() && !target.delete()) {
+            //noinspection ResultOfMethodCallIgnored
+            temporary.delete();
+            throw new IOException("Unable to replace " + target.getAbsolutePath());
+        }
+        if (!temporary.renameTo(target)) {
+            //noinspection ResultOfMethodCallIgnored
+            temporary.delete();
+            throw new IOException("Unable to finish writing " + target.getAbsolutePath());
         }
     }
 

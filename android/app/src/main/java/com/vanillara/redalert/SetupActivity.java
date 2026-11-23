@@ -227,7 +227,7 @@ public class SetupActivity extends Activity {
     private void startImport(GameDataStore.Side side, Uri uri) {
         importing = true;
         lastProgressAt = 0;
-        setBusy(true, "Importing " + side.displayName + " data…");
+        setBusy(true, "Importing game data…");
         progressText.setText("Scanning the selected folder…");
 
         executor.execute(() -> {
@@ -277,7 +277,7 @@ public class SetupActivity extends Activity {
         if (result.configCreated) {
             message += "\n\nA REDALERT.INI was created because the selected folder did not contain one.";
         }
-        message += "\n\n" + side.displayName + " data is ready.";
+        message += "\n\n" + result.summary;
         new AlertDialog.Builder(this)
             .setTitle("Import complete")
             .setMessage(message)
@@ -316,12 +316,16 @@ public class SetupActivity extends Activity {
 
         GameDataInspector.Status allied = GameDataStore.status(this, GameDataStore.Side.ALLIES);
         GameDataInspector.Status soviet = GameDataStore.status(this, GameDataStore.Side.SOVIET);
+        boolean alliedReady = allied.isPlayable()
+            && GameDataStore.hasEngineMain(this, GameDataStore.Side.ALLIES);
+        boolean sovietReady = soviet.isPlayable()
+            && GameDataStore.hasEngineMain(this, GameDataStore.Side.SOVIET);
 
-        alliedStatus.setText(describe(allied));
-        sovietStatus.setText(describe(soviet));
-        alliedStatus.setTextColor(getColor(allied.isPlayable()
+        alliedStatus.setText(describe(allied, GameDataStore.Side.ALLIES));
+        sovietStatus.setText(describe(soviet, GameDataStore.Side.SOVIET));
+        alliedStatus.setTextColor(getColor(alliedReady
             ? R.color.text_ok : allied.hasMix ? R.color.text_warning : R.color.text_secondary));
-        sovietStatus.setTextColor(getColor(soviet.isPlayable()
+        sovietStatus.setTextColor(getColor(sovietReady
             ? R.color.text_ok : soviet.hasMix ? R.color.text_warning : R.color.text_secondary));
 
         canPlay = allied.isPlayable() || soviet.isPlayable();
@@ -329,33 +333,38 @@ public class SetupActivity extends Activity {
         play.setText(canPlay ? R.string.play : R.string.play_needs_data);
 
         if (!allied.hasMix && !soviet.hasMix) {
-            warning.setText("No game data found yet. Copy your Allied and Soviet files into the "
-                + "folders above, then tap Rescan.");
-        } else if (allied.isPlayable() && soviet.isPlayable()) {
+            warning.setText("No game data found yet. Tap an Import button and pick the folder "
+                + "that holds your Red Alert files, then tap Rescan.");
+        } else if (alliedReady && sovietReady) {
             warning.setText("Allied and Soviet data are ready.");
-        } else if (allied.isPlayable()) {
+        } else if (alliedReady) {
             warning.setText("Allied data is ready. Soviet data is missing or incomplete, so the "
                 + "Soviet campaign and some movies may not work.");
-        } else if (soviet.isPlayable()) {
+        } else if (sovietReady) {
             warning.setText("Soviet data is ready. Allied data is missing or incomplete, so the "
                 + "Allied campaign and some movies may not work.");
+        } else if (allied.isPlayable() || soviet.isPlayable()) {
+            warning.setText("REDALERT.MIX is present, but a disc's MAIN.MIX is missing, so campaign "
+                + "missions will fail to load. Import the folder that has MAIN.MIX.");
         } else {
-            warning.setText("Game files were found, but REDALERT.MIX is missing. Copy the complete "
-                + "disc contents into the folders above.");
+            warning.setText("Game files were found, but REDALERT.MIX is missing. Import the folder "
+                + "that holds the complete disc contents.");
         }
     }
 
-    private String describe(GameDataInspector.Status status) {
+    private String describe(GameDataInspector.Status status, GameDataStore.Side side) {
         if (!status.hasMix) {
             return getString(R.string.not_imported);
         }
         StringBuilder text = new StringBuilder();
         text.append(status.fileCount).append(" files • ")
             .append(GameDataStore.formatBytes(status.byteCount));
-        if (status.hasMainMix) {
-            text.append(" • ").append(getString(R.string.ready));
-        } else {
+        if (!status.hasMainMix) {
             text.append(" • missing ").append(GameDataInspector.MAIN_MIX);
+        } else if (!GameDataStore.hasEngineMain(this, side)) {
+            text.append(" • missing MAIN.MIX");
+        } else {
+            text.append(" • ").append(getString(R.string.ready));
         }
         if (status.hasCounterstrike && status.hasAftermath) {
             text.append(" • CS & AM");
