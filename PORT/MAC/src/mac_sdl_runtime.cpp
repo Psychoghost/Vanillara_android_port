@@ -500,8 +500,10 @@ static void mobile_queue_touch_output(MobileTouchGestureOutput const *out)
 				break;
 			case MOBILE_TOUCH_LEFT_UP:
 				mac_queue_mouse_button_with_cursor(MobileTouchButtons_GetEffectiveVK(&MobileTouchButtons, VK_LBUTTON), false, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
-				MobileTouchButtons_ResetModifiers(&MobileTouchButtons);
-				mac_update_modifier_state();
+				/* RMB mode is decided when the click is queued, so it can end now. ATK/MOV are
+				 * read by the game when the queued click is dispatched, so they end in
+				 * MacWin_DispatchMessage instead. */
+				MobileTouchButtons.right_click_mode = 0;
 				break;
 			case MOBILE_TOUCH_RIGHT_DOWN:
 				mac_queue_mouse_button_with_cursor(VK_RBUTTON, true, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
@@ -614,7 +616,18 @@ bool MacSDL_SetScaleQuality(char const *quality)
 
 char const *MacSDL_GetScaleQuality(void)
 {
-	return mac_scale_quality_requested();
+	return MacScaleQuality;
+}
+
+static SDL_ScaleMode mac_scale_mode(void)
+{
+	if (strcmp(MacScaleQuality, "linear") == 0) {
+		return SDL_ScaleModeLinear;
+	}
+	if (strcmp(MacScaleQuality, "best") == 0) {
+		return SDL_ScaleModeBest;
+	}
+	return SDL_ScaleModeNearest;
 }
 
 #if defined(RA_MOBILE_TOUCH)
@@ -630,16 +643,9 @@ static void mobile_menu_layout(void)
 
 static void mobile_menu_cycle_scale(void)
 {
-	if (!MacRenderer) {
-		return;
-	}
 	MacSDL_SetScaleQuality(MobileMenu_NextScaleQuality(MacScaleQuality));
 	if (MacTexture) {
-		SDL_DestroyTexture(MacTexture);
-	}
-	MacTexture = SDL_CreateTexture(MacRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, MacWidth, MacHeight);
-	if (MacTexture) {
-		SDL_SetTextureBlendMode(MacTexture, SDL_BLENDMODE_NONE);
+		SDL_SetTextureScaleMode(MacTexture, mac_scale_mode());
 	}
 }
 
@@ -672,6 +678,9 @@ static void mobile_menu_draw(void)
 	for (int i = 0; i < MOBILE_MENU_COUNT; ++i) {
 		MobileMenuRect r = MobileMenu_ItemRect(&MobileMenuState, i);
 		bool lit = MobileMenu_IsActive(&MobileTouchButtons, i) != 0 || MobileMenuState.pressed_item == i;
+		if (i == MOBILE_MENU_GFX && strcmp(MacScaleQuality, "nearest") != 0) {
+			lit = true;
+		}
 		SDL_Rect box;
 		box.x = (int)((float)r.x * sx);
 		box.y = (int)((float)r.y * sy);
@@ -720,7 +729,13 @@ bool MacSDL_SetMode(int width, int height)
 #if defined(RA_MOBILE_TOUCH)
 		SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
 #endif
-		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, mac_scale_quality_requested());
+		{
+			char const *seed = mac_scale_quality_requested();
+			if (seed != MacScaleQuality) {
+				strncpy(MacScaleQuality, seed, sizeof(MacScaleQuality) - 1);
+			}
+		}
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, MacScaleQuality);
 		SDL_SetHint(SDL_HINT_RENDER_LOGICAL_SIZE_MODE, "letterbox");
 #if defined(RA_IOS) || defined(RA_ANDROID)
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
@@ -1122,6 +1137,7 @@ void MacSDL_Present8(unsigned char const *pixels, int width, int height, int pit
 		}
 	}
 
+	SDL_SetTextureScaleMode(MacTexture, mac_scale_mode());
 	SDL_UpdateTexture(MacTexture, 0, MacFrame, width * (int)sizeof(uint32_t));
 	RAAspectViewport viewport = mac_renderer_viewport(width, height);
 	SDL_Rect destination;
@@ -1216,6 +1232,14 @@ extern "C" LRESULT MacWin_DispatchMessage(MSG const *msg)
 	MacUnmodifiedKeyDispatch = MobileKeyMessage_IsUnmodified(msg->message, msg->lParam) != 0;
 	LRESULT result = Windows_Procedure(msg->hwnd, msg->message, msg->wParam, msg->lParam);
 	MacUnmodifiedKeyDispatch = previous;
+#if defined(RA_MOBILE_TOUCH)
+	if ((msg->message == WM_LBUTTONUP || msg->message == WM_RBUTTONUP) &&
+			(MobileTouchButtons.force_attack_active || MobileTouchButtons.force_move_active)) {
+		MobileTouchButtons.force_attack_active = 0;
+		MobileTouchButtons.force_move_active = 0;
+		mac_update_modifier_state();
+	}
+#endif
 	return result;
 }
 
