@@ -11,6 +11,7 @@
 #include "mobile_touch_gesture.h"
 #include "mobile_zoom.h"
 #include "mobile_dpad.h"
+#include "mobile_touch_menu.h"
 #include "ra_aspect_viewport.h"
 #include <mmsystem.h>
 
@@ -46,6 +47,7 @@ static MobileZoomState MobileZoom;
 static MobilePinchState MobilePinch;
 static MobileTouchButtonState MobileTouchButtons;
 static MobileDpad MobileDpadState;
+static MobileMenu MobileMenuState;
 static bool MobileTouchCursorHidden = true;
 static bool MobilePointerDragCandidate = false;
 static int MobilePointerDragStartX = 0;
@@ -303,6 +305,9 @@ static void mac_update_modifier_state(void)
 	MacKeyState[VK_MENU] = (mods & KMOD_ALT) ? 1 : 0;
 	MacToggleState[VK_CAPITAL] = (mods & KMOD_CAPS) ? 1 : 0;
 	MacToggleState[VK_NUMLOCK] = (mods & KMOD_NUM) ? 1 : 0;
+#if defined(RA_MOBILE_TOUCH)
+	MobileMenu_ApplyModifiers(&MobileTouchButtons, MacKeyState);
+#endif
 }
 
 static bool mac_state_down(BYTE const *state, int key)
@@ -491,10 +496,12 @@ static void mobile_queue_touch_output(MobileTouchGestureOutput const *out)
 				mac_update_mouse_position(touch_event->x, touch_event->y);
 				break;
 			case MOBILE_TOUCH_LEFT_DOWN:
-				mac_queue_mouse_button_with_cursor(VK_LBUTTON, true, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
+				mac_queue_mouse_button_with_cursor(MobileTouchButtons_GetEffectiveVK(&MobileTouchButtons, VK_LBUTTON), true, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
 				break;
 			case MOBILE_TOUCH_LEFT_UP:
-				mac_queue_mouse_button_with_cursor(VK_LBUTTON, false, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
+				mac_queue_mouse_button_with_cursor(MobileTouchButtons_GetEffectiveVK(&MobileTouchButtons, VK_LBUTTON), false, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
+				MobileTouchButtons_ResetModifiers(&MobileTouchButtons);
+				mac_update_modifier_state();
 				break;
 			case MOBILE_TOUCH_RIGHT_DOWN:
 				mac_queue_mouse_button_with_cursor(VK_RBUTTON, true, touch_event->x, touch_event->y, touch_event->update_cursor != 0);
@@ -610,6 +617,93 @@ char const *MacSDL_GetScaleQuality(void)
 	return mac_scale_quality_requested();
 }
 
+#if defined(RA_MOBILE_TOUCH)
+static void mobile_menu_layout(void)
+{
+	int w = MacWidth;
+	int h = MacHeight;
+	if (MacWindow) {
+		SDL_GetWindowSize(MacWindow, &w, &h);
+	}
+	MobileMenu_Layout(&MobileMenuState, w, h);
+}
+
+static void mobile_menu_cycle_scale(void)
+{
+	if (!MacRenderer) {
+		return;
+	}
+	MacSDL_SetScaleQuality(MobileMenu_NextScaleQuality(MacScaleQuality));
+	if (MacTexture) {
+		SDL_DestroyTexture(MacTexture);
+	}
+	MacTexture = SDL_CreateTexture(MacRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, MacWidth, MacHeight);
+	if (MacTexture) {
+		SDL_SetTextureBlendMode(MacTexture, SDL_BLENDMODE_NONE);
+	}
+}
+
+static void mobile_menu_run(int item)
+{
+	switch (MobileMenu_Activate(&MobileTouchButtons, item)) {
+		case MOBILE_MENU_ACTION_KEY_ESC: mac_queue_unmodified_key_pulse(VK_ESCAPE); break;
+		case MOBILE_MENU_ACTION_KEY_SCATTER: mac_queue_unmodified_key_pulse('X'); break;
+		case MOBILE_MENU_ACTION_CYCLE_SCALE: mobile_menu_cycle_scale(); break;
+		default: break;
+	}
+	mac_update_modifier_state();
+}
+
+static void mobile_menu_draw(void)
+{
+	if (InMovie || !MacWindow || !MacRenderer) {
+		return;
+	}
+	int ww = 0, wh = 0, ow = 0, oh = 0;
+	SDL_GetWindowSize(MacWindow, &ww, &wh);
+	SDL_GetRendererOutputSize(MacRenderer, &ow, &oh);
+	if (ww <= 0 || wh <= 0 || ow <= 0 || oh <= 0) {
+		return;
+	}
+	mobile_menu_layout();
+	float sx = (float)ow / (float)ww;
+	float sy = (float)oh / (float)wh;
+	SDL_SetRenderDrawBlendMode(MacRenderer, SDL_BLENDMODE_BLEND);
+	for (int i = 0; i < MOBILE_MENU_COUNT; ++i) {
+		MobileMenuRect r = MobileMenu_ItemRect(&MobileMenuState, i);
+		bool lit = MobileMenu_IsActive(&MobileTouchButtons, i) != 0 || MobileMenuState.pressed_item == i;
+		SDL_Rect box;
+		box.x = (int)((float)r.x * sx);
+		box.y = (int)((float)r.y * sy);
+		box.w = (int)((float)r.w * sx);
+		box.h = (int)((float)r.h * sy);
+		if (lit) SDL_SetRenderDrawColor(MacRenderer, 255, 255, 255, 150);
+		else SDL_SetRenderDrawColor(MacRenderer, 0, 0, 0, 110);
+		SDL_RenderFillRect(MacRenderer, &box);
+
+		int px = box.w / 20;
+		if (px < 1) px = 1;
+		int ox = box.x + (box.w - 17 * px) / 2;
+		int oy = box.y + (box.h - 7 * px) / 2;
+		if (lit) SDL_SetRenderDrawColor(MacRenderer, 0, 0, 0, 230);
+		else SDL_SetRenderDrawColor(MacRenderer, 255, 255, 255, 220);
+		char const *label = MobileMenu_Label(i);
+		for (int c = 0; c < 3; ++c) {
+			for (int row = 0; row < 7; ++row) {
+				unsigned char bits = MobileMenu_GlyphRow(label[c], row);
+				for (int col = 0; col < 5; ++col) {
+					if (bits & (0x10 >> col)) {
+						SDL_Rect dot = { ox + (c * 6 + col) * px, oy + row * px, px, px };
+						SDL_RenderFillRect(MacRenderer, &dot);
+					}
+				}
+			}
+		}
+	}
+	SDL_SetRenderDrawBlendMode(MacRenderer, SDL_BLENDMODE_NONE);
+}
+#endif
+
 bool MacSDL_GetFullscreen(void)
 {
 	return MacFullscreen;
@@ -652,6 +746,7 @@ bool MacSDL_SetMode(int width, int height)
 		MobilePinch_Init(&MobilePinch);
 		MobileTouchButtons_Init(&MobileTouchButtons);
 		MobileDpad_Init(&MobileDpadState);
+		MobileMenu_Init(&MobileMenuState);
 #endif
 	}
 
@@ -787,6 +882,12 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 					float pad_x = 0.0f;
 					float pad_y = 0.0f;
 					mobile_window_point(event.tfinger.x, event.tfinger.y, &pad_x, &pad_y);
+					mobile_menu_layout();
+					int menu_item = MobileMenu_Down(&MobileMenuState, (long long)event.tfinger.fingerId, pad_x, pad_y);
+					if (menu_item >= 0) {
+						mobile_menu_run(menu_item);
+						break;
+					}
 					mobile_dpad_layout();
 					if (MobileDpad_Down(&MobileDpadState, (long long)event.tfinger.fingerId, pad_x, pad_y, mac_now_ms())) {
 						break;
@@ -811,6 +912,9 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 			case SDL_FINGERMOTION: {
 				int x = 0;
 				int y = 0;
+				if (MobileMenu_Owns(&MobileMenuState, (long long)event.tfinger.fingerId)) {
+					break;
+				}
 				if (MobileDpad_Owns(&MobileDpadState, (long long)event.tfinger.fingerId)) {
 					float pad_x = 0.0f;
 					float pad_y = 0.0f;
@@ -846,6 +950,10 @@ static void mac_sdl_pump_events(bool allow_idle_delay)
 			case SDL_FINGERUP: {
 				int x = 0;
 				int y = 0;
+				if (MobileMenu_Owns(&MobileMenuState, (long long)event.tfinger.fingerId)) {
+					MobileMenu_Up(&MobileMenuState, (long long)event.tfinger.fingerId);
+					break;
+				}
 				if (MobileDpad_Owns(&MobileDpadState, (long long)event.tfinger.fingerId)) {
 					MobileDpad_Up(&MobileDpadState, (long long)event.tfinger.fingerId);
 					break;
@@ -1071,6 +1179,9 @@ void MacSDL_Present8(unsigned char const *pixels, int width, int height, int pit
 			SDL_SetRenderDrawBlendMode(MacRenderer, SDL_BLENDMODE_NONE);
 		}
 	}
+#endif
+#if defined(RA_MOBILE_TOUCH)
+	mobile_menu_draw();
 #endif
 	SDL_RenderPresent(MacRenderer);
 	MacPresenting = false;
