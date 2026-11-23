@@ -6,7 +6,8 @@
 #include "mobile_touch_buttons.h"
 
 /*
- * On-screen translucent shortcut menu, drawn in the top-right corner.
+ * On-screen translucent shortcut menu: one row of buttons along the top edge,
+ * centered horizontally. The right edge stays free for the radar and sidebar.
  * Pure layout / hit-test / state logic. No SDL calls, so it is unit-testable.
  * The runtime draws the rects and glyphs and performs the returned action.
  */
@@ -65,14 +66,16 @@ static inline void MobileMenu_Layout(MobileMenu *m, int window_w, int window_h)
 	m->gap = m->margin / 2;
 }
 
+/* Buttons run left to right in item order, centered on the window's horizontal midpoint. */
 static inline MobileMenuRect MobileMenu_ItemRect(MobileMenu const *m, int item)
 {
 	MobileMenuRect r = {0, 0, 0, 0};
 	if (!m || item < 0 || item >= MOBILE_MENU_COUNT) return r;
+	int total_w = MOBILE_MENU_COUNT * m->size + (MOBILE_MENU_COUNT - 1) * m->gap;
 	r.w = m->size;
 	r.h = m->size;
-	r.x = m->window_w - m->margin - m->size;
-	r.y = m->margin + item * (m->size + m->gap);
+	r.x = (m->window_w - total_w) / 2 + item * (m->size + m->gap);
+	r.y = m->margin;
 	return r;
 }
 

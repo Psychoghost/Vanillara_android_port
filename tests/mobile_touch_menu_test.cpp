@@ -3,25 +3,47 @@
 #include <assert.h>
 #include <string.h>
 
-static void test_layout_in_bounds_top_right(void)
+static void test_layout_top_center_row(void)
 {
 	MobileMenu m;
 	MobileMenu_Init(&m);
 	int sizes[][2] = {{1920, 1080}, {2560, 1600}, {1280, 720}, {640, 480}, {1080, 1920}};
 	for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); ++s) {
-		MobileMenu_Layout(&m, sizes[s][0], sizes[s][1]);
+		int window_w = sizes[s][0];
+		int window_h = sizes[s][1];
+		MobileMenu_Layout(&m, window_w, window_h);
 		assert(m.size > 0);
+
+		MobileMenuRect first = MobileMenu_ItemRect(&m, 0);
+		MobileMenuRect last = MobileMenu_ItemRect(&m, MOBILE_MENU_COUNT - 1);
+		int left_space = first.x;
+		int right_space = window_w - (last.x + last.w);
+		assert(left_space >= 0 && right_space >= 0);
+		assert(left_space - right_space <= 1 && right_space - left_space <= 1);
+
 		for (int i = 0; i < MOBILE_MENU_COUNT; ++i) {
 			MobileMenuRect r = MobileMenu_ItemRect(&m, i);
-			assert(r.x >= sizes[s][0] / 2);
-			assert(r.x + r.w <= sizes[s][0]);
-			assert(r.y >= 0 && r.y + r.h <= sizes[s][1]);
+			assert(r.y == m.margin);
+			assert(r.y + r.h <= window_h / 4);
+			assert(r.x >= 0 && r.x + r.w <= window_w);
 			if (i > 0) {
 				MobileMenuRect p = MobileMenu_ItemRect(&m, i - 1);
-				assert(r.y >= p.y + p.h);
+				assert(r.y == p.y);
+				assert(r.x >= p.x + p.w);
 			}
 		}
 	}
+}
+
+static void test_right_edge_stays_free(void)
+{
+	MobileMenu m;
+	MobileMenu_Init(&m);
+	MobileMenu_Layout(&m, 1920, 1080);
+	MobileMenuRect last = MobileMenu_ItemRect(&m, MOBILE_MENU_COUNT - 1);
+	assert(last.x + last.w < 1920 * 3 / 4);
+	assert(MobileMenu_HitTest(&m, 1900.0f, 40.0f) == -1);
+	assert(MobileMenu_HitTest(&m, 1900.0f, 540.0f) == -1);
 }
 
 static void test_hit_test(void)
@@ -131,7 +153,8 @@ static void test_labels_have_glyphs(void)
 
 int main(void)
 {
-	test_layout_in_bounds_top_right();
+	test_layout_top_center_row();
+	test_right_edge_stays_free();
 	test_hit_test();
 	test_finger_ownership();
 	test_activate_toggles_and_actions();
